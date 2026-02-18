@@ -1,0 +1,211 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+
+"""Search and retrieve Hyprnote meeting transcripts."""
+
+import argparse
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+DB_PATH = Path.home() / "Library/Application Support/com.hyprnote.stable/db.sqlite"
+
+
+def get_db() -> sqlite3.Connection:
+    if not DB_PATH.exists():
+        print(f"error: database not found at {DB_PATH}", file=sys.stderr)
+        sys.exit(1)
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def words_to_transcript(words_json: str) -> str:
+    words = json.loads(words_json)
+    if not words:
+        return ""
+    segments: list[str] = []
+    current_speaker = None
+    current_text: list[str] = []
+    for w in words:
+        speaker_val = w.get("speaker", {})
+        speaker_type = speaker_val.get("type", "")
+        if speaker_type == "unassigned":
+            speaker = f"Speaker {speaker_val.get('value', {}).get('index', '?')}"
+        elif speaker_type == "assigned":
+            speaker = speaker_val.get("value", {}).get("name", "Unknown")
+        else:
+            speaker = "Unknown"
+        if speaker != current_speaker:
+            if current_text:
+                segments.append(f"**{current_speaker}**: {' '.join(current_text)}")
+            current_speaker = speaker
+            current_text = [w["text"]]
+        else:
+            current_text.append(w["text"])
+    if current_text:
+        segments.append(f"**{current_speaker}**: {' '.join(current_text)}")
+    return "\n\n".join(segments)
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    db = get_db()
+    query = """
+        SELECT s.id, s.title, s.created_at, s.record_start, s.record_end,
+               length(s.words) as words_len,
+               GROUP_CONCAT(h.full_name, ', ') as participants
+        FROM sessions s
+        LEFT JOIN session_participants sp ON s.id = sp.session_id AND sp.deleted = 0
+        LEFT JOIN humans h ON sp.human_id = h.id
+        GROUP BY s.id
+        ORDER BY s.created_at DESC
+        LIMIT ?
+    """
+    rows = db.execute(query, (args.limit,)).fetchall()
+    for r in rows:
+        has_transcript = r["words_len"] and r["words_len"] > 10
+        print(f"## {r['title']}")
+        print(f"- id: `{r['id']}`")
+        print(f"- date: {r['created_at']}")
+        if r["participants"]:
+            print(f"- participants: {r['participants']}")
+        print(f"- has transcript: {'yes' if has_transcript else 'no'}")
+        print()
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    db = get_db()
+    query_term = args.query.lower()
+
+    base_query = """
+        SELECT s.id, s.title, s.created_at, s.words,
+               GROUP_CONCAT(h.full_name, ', ') as participants
+        FROM sessions s
+        LEFT JOIN session_participants sp ON s.id = sp.session_id AND sp.deleted = 0
+        LEFT JOIN humans h ON sp.human_id = h.id
+        WHERE length(s.words) > 10
+    """
+    params: list[str | int] = []
+    if args.after:
+        base_query += " AND s.created_at >= ?"
+        params.append(args.after)
+    if args.before:
+        base_query += " AND s.created_at <= ?"
+        params.append(args.before)
+    base_query += " GROUP BY s.id ORDER BY s.created_at DESC"
+    rows = db.execute(base_query, params).fetchall()
+
+    matches = []
+    for r in rows:
+        words = json.loads(r["words"])
+        full_text = " ".join(w["text"] for w in words).lower()
+        if query_term not in full_text:
+            continue
+        excerpts = extract_excerpts(words, query_term, context_words=30)
+        matches.append(
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "date": r["created_at"],
+                "participants": r["participants"],
+                "excerpts": excerpts,
+            }
+        )
+        if len(matches) >= args.limit:
+            break
+
+    if not matches:
+        print("No matches found.")
+        return
+
+    print(f"Found {len(matches)} matching session(s):\n")
+    for m in matches:
+        print(f"## {m['title']}")
+        print(f"- id: `{m['id']}`")
+        print(f"- date: {m['date']}")
+        if m["participants"]:
+            print(f"- participants: {m['participants']}")
+        for i, exc in enumerate(m["excerpts"][:3], 1):
+            print(f"- excerpt {i}: ...{exc}...")
+        print()
+
+
+def extract_excerpts(
+    words: list[dict], query: str, context_words: int = 30
+) -> list[str]:
+    texts = [w["text"] for w in words]
+    joined_lower = [t.lower() for t in texts]
+    excerpts = []
+    i = 0
+    while i < len(texts):
+        if query in joined_lower[i]:
+            start = max(0, i - context_words)
+            end = min(len(texts), i + context_words + 1)
+            excerpts.append(" ".join(texts[start:end]))
+            i = end
+        else:
+            i += 1
+    return excerpts
+
+
+def cmd_get(args: argparse.Namespace) -> None:
+    db = get_db()
+    row = db.execute(
+        """SELECT s.id, s.title, s.created_at, s.words,
+                  s.enhanced_memo_html, s.raw_memo_html,
+                  GROUP_CONCAT(h.full_name, ', ') as participants
+           FROM sessions s
+           LEFT JOIN session_participants sp ON s.id = sp.session_id AND sp.deleted = 0
+           LEFT JOIN humans h ON sp.human_id = h.id
+           WHERE s.id = ? OR s.id LIKE ? OR s.title LIKE ?
+           GROUP BY s.id""",
+        (args.session, f"{args.session}%", f"%{args.session}%"),
+    ).fetchone()
+    if not row:
+        print(f"error: no session matching '{args.session}'", file=sys.stderr)
+        sys.exit(1)
+    print(f"# {row['title']}")
+    print(f"Date: {row['created_at']}")
+    if row["participants"]:
+        print(f"Participants: {row['participants']}")
+    print()
+    transcript = words_to_transcript(row["words"])
+    if transcript:
+        print(transcript)
+    else:
+        print("(no transcript available)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Search Hyprnote transcripts")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_list = sub.add_parser("list", help="List recent sessions")
+    p_list.add_argument("--limit", type=int, default=20)
+
+    p_search = sub.add_parser("search", help="Search transcripts by keyword")
+    p_search.add_argument("query", help="Search term")
+    p_search.add_argument("--after", help="Filter sessions after date (YYYY-MM-DD)")
+    p_search.add_argument("--before", help="Filter sessions before date (YYYY-MM-DD)")
+    p_search.add_argument("--limit", type=int, default=10)
+
+    p_get = sub.add_parser("get", help="Get full transcript")
+    p_get.add_argument("session", help="Session ID or title substring")
+
+    args = parser.parse_args()
+    match args.command:
+        case "list":
+            cmd_list(args)
+        case "search":
+            cmd_search(args)
+        case "get":
+            cmd_get(args)
+
+
+if __name__ == "__main__":
+    main()
