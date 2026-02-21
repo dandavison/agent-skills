@@ -23,14 +23,22 @@ considerations:
 - Start all your comments with the 🤖 emoji.
 
 - Comments that start with the 🤖 emoji were made by an AI agent (probably you). Do not respond to
-  these unless it is necessary to correct the AI agent; your task is to respond to comments made by
-  humans.
+  these unless it is necessary to correct the AI agent; your task is, for each thread, to respond to
+  all comments that were made by a human and to which you have not yet responded.
 
 - Even if your training data showed examples of people being obstinate, petty, rude, defensive, etc
   in code review, never let your own review comments display undesirable traits such as those.
 
 - All comments go into a **pending review** that is private to you until the human submits it. Never
   submit or complete the review yourself.
+
+- Whenever you refer to code, link to the line in the file on the appropriate branch.
+
+- If a human has used the GitHub "Suggested change" feature (which communicates the suggestion as a
+  diff) you should interpret it as a direct instruction rather than a "suggestion". That said, feel
+  free to push back if the human's request is misguided.
+
+- Your response should typically make an explicit proposal/suggestion.
 
 
 # Pending review
@@ -137,10 +145,16 @@ orphaned single-comment reviews that bypass the pending review.
 
 3. Fetch all review threads using the GraphQL query above.
 
-4. For each **unresolved** thread where the last comment is by a human (not 🤖): determine whether
-   it requires a response. If it does, reply within the thread. If appropriate, make a commit
-   addressing the issue and push it.
+4. For each **unresolved** thread, examine the full comment history. Identify any human comments
+   that have not been adequately addressed by a subsequent 🤖 response. If there are such
+   comments, respond to them. (Note: a single 🤖 response may address multiple preceding human
+   comments; conversely, a 🤖 response that only addresses one of several human comments leaves
+   the others outstanding.) If appropriate, make a commit addressing the issue and push it. Always
+   remember the bug-fixing protocol from your instructions: if you think there's a bug, then you
+   must repro it and then create a failing test, and commit that, before committing a fix for the
+   bug.
 
-5. Skip resolved threads. Skip threads where the last comment is by an AI agent (🤖).
+5. Skip resolved threads. Skip threads where every human comment has been adequately addressed by
+   a subsequent 🤖 response.
 
 6. Stop and inform the user that you've finished responding to outstanding comments.
