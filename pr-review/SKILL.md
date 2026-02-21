@@ -18,7 +18,27 @@ Otherwise (e.g. PR merged or closed, comments by others, or you were unable to d
 
 The instructions below assume that you have determined that it's OK to proceed. First some general considerations:
 
-- Create your review using GitHub's formal "Review" feature as opposed to as a collection of ad-hoc comments. This means you will accumulate all comments, then submit them as a single `gh api repos/{owner}/{repo}/pulls/{number}/reviews` call with `event` and `comments[]`.
+- Create your review using GitHub's formal "Review" feature as opposed to as a collection of ad-hoc
+  comments. Accumulate all comments, write them to a JSON file, then submit as a single review:
+
+  ```bash
+  # Build /tmp/review.json:
+  {
+    "event": "COMMENT",
+    "body": "Overall review summary",
+    "comments": [
+      {"path": "file.go", "line": 42, "side": "RIGHT", "body": "Comment text"},
+      ...
+    ]
+  }
+  # Submit:
+  gh api repos/{owner}/{repo}/pulls/{number}/reviews --input /tmp/review.json
+  ```
+
+  NEVER use `POST /repos/{owner}/{repo}/pulls/{pr}/comments` for individual comments — those create
+  orphaned single-comment reviews that don't display inline in the "Files changed" view. The `line`
+  is the absolute line number in the new version of the file. Use `side: "RIGHT"` for new/changed
+  lines. Comments can only be placed on lines within the PR diff.
 
 - Start all your comments with the 🤖 emoji.
 

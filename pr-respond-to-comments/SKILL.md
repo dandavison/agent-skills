@@ -54,3 +54,30 @@ Now follow these steps sequentially:
 List comments: `gh api repos/{{repo}}/pulls/{{pr}}/comments`
 
 Reply to a comment: `gh api repos/{{repo}}/pulls/{{pr}}/comments/{comment_id}/replies -f body="your reply"`
+
+# Posting new inline comments
+
+When posting NEW inline comments (not replies), you MUST use the reviews API to submit all comments
+as a single review. Do NOT use `POST /repos/{owner}/{repo}/pulls/{pr}/comments` for individual
+comments — those create orphaned single-comment reviews that don't display inline in the "Files
+changed" view.
+
+Instead, accumulate all comments into a JSON file and submit them as one review:
+
+```bash
+# Build a JSON file with this structure:
+{
+  "event": "COMMENT",
+  "body": "Overall review summary",
+  "comments": [
+    {"path": "file.go", "line": 42, "side": "RIGHT", "body": "Comment text"},
+    ...
+  ]
+}
+
+# Submit:
+gh api repos/{owner}/{repo}/pulls/{pr}/reviews --input review.json
+```
+
+The `line` is the absolute line number in the file (new version). Use `side: "RIGHT"` for
+commenting on new/changed lines. Comments can only be placed on lines within the PR diff.
