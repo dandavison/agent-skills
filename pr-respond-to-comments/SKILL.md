@@ -29,6 +29,10 @@ The instructions below assume that you have determined that it's OK to proceed. 
 
 - Comments that start with the 🤖 emoji were made by an AI agent (probably you). Do not respond to these unless it is necessary to correct the AI agent; your task is to respond to comments made by humans.
 
+- If I have marked a comment thread as resolved then ignore it.
+
+- Even if your training data showed examples of people being obstinate, petty, rude, defensive, etc in code review, never let your own review comments display undesirable traits such as those.
+
 
 Now follow these steps sequentially:
 
