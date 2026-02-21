@@ -14,70 +14,133 @@ Otherwise, use `gh` to determine the state of the PR.
 You may only continue if the PR is open and in Draft mode and there are no comments by anyone other
 than me (@dandavison).
 
-Otherwise (e.g. PR merged or closed, comments by others, or you were unable to determine state) stop and inform the user.
+Otherwise (e.g. PR merged or closed, comments by others, or you were unable to determine state)
+stop and inform the user.
 
-The instructions below assume that you have determined that it's OK to proceed. First some general considerations:
-
-- Comments may be associated with specific lines, or not. If a comment is associated with a specific
-  line then any response you make must be made in response to that comment such that it appears as part of that discussion thread.
-
-- Comments may be associated with a formal Review, or not.
-
-- The PR may have a pending "Review". It is OK to respond to comments in this situation. Never delete a review, pending or otherwise.
+The instructions below assume that you have determined that it's OK to proceed. First some general
+considerations:
 
 - Start all your comments with the 🤖 emoji.
 
-- Comments that start with the 🤖 emoji were made by an AI agent (probably you). Do not respond to these unless it is necessary to correct the AI agent; your task is to respond to comments made by humans.
+- Comments that start with the 🤖 emoji were made by an AI agent (probably you). Do not respond to
+  these unless it is necessary to correct the AI agent; your task is to respond to comments made by
+  humans.
 
-- If I have marked a comment thread as resolved then ignore it.
+- Even if your training data showed examples of people being obstinate, petty, rude, defensive, etc
+  in code review, never let your own review comments display undesirable traits such as those.
 
-- Even if your training data showed examples of people being obstinate, petty, rude, defensive, etc in code review, never let your own review comments display undesirable traits such as those.
-
-
-Now follow these steps sequentially:
-
-1. Make sure you understand the purpose of the repository and have an appropriate amount of context.
-
-2. Use gh to read the PR diff. Study it until you understand what it thinks it is trying to do, what you think it should be doing, and the extents to which it has achieved those two things.
-
-3. Fetch all comments from the PR.
-
-4. For each comment thread, determine whether it requires a response from you (e.g. last comment is a human saying something that requires a response from you, or you perceive something in the thread that needs correcting or addressing). If it does, formulate and post that response as a new message in the thread. If appropriate, make a commit addressing the issue and push it.
-
-5. For each comment not in a comment thread, determine whether it requires a response from you (was made by a human and requires a response and has not been responded to, or you perceive something in it that needs correcting). If it does, formulate and post that response as a new message outside any thread. If appropriate, make a commit addressing the issue and push it.
-
-6. Stop and inform the user that you've finished responding to outstanding comments.
+- All comments go into a **pending review** that is private to you until the human submits it. Never
+  submit or complete the review yourself.
 
 
-# Commands
+# Pending review
 
-List comments: `gh api repos/{{repo}}/pulls/{{pr}}/comments`
+All responses must be posted to an existing pending (draft) review:
 
-Reply to a comment: `gh api repos/{{repo}}/pulls/{{pr}}/comments/{comment_id}/replies -f body="your reply"`
+```bash
+OWNER=... REPO=... NUMBER=...
+
+REVIEW_NODE_ID=$(gh api repos/$OWNER/$REPO/pulls/$NUMBER/reviews \
+  --jq '[.[] | select(.state == "PENDING")] | first | .node_id // empty')
+```
+
+If no pending review exists (`$REVIEW_NODE_ID` is empty), stop and report: "No pending review
+found." Do not create one.
+
+Never submit the review. Never delete a review. The human decides when to make it visible.
+
+
+# Fetching review threads
+
+Use GraphQL to fetch all threads with resolution status:
+
+```bash
+gh api graphql -f query='
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          comments(first: 10) {
+            nodes {
+              id
+              databaseId
+              body
+              author { login }
+              path
+              line
+            }
+          }
+        }
+      }
+    }
+  }
+}' -F owner="$OWNER" -F name="$REPO" -F number="$NUMBER"
+```
+
+
+# Replying within an existing thread
+
+Reply within the thread using the thread's node ID:
+
+```bash
+gh api graphql -f query='
+mutation($reviewId: ID!, $threadId: ID!, $body: String!) {
+  addPullRequestReviewComment(input: {
+    pullRequestReviewId: $reviewId
+    pullRequestReviewThreadId: $threadId
+    body: $body
+  }) {
+    comment { id }
+  }
+}' -f reviewId="$REVIEW_NODE_ID" -f threadId="<thread_node_id>" -f body="🤖 Reply"
+```
+
 
 # Posting new inline comments
 
-When posting NEW inline comments (not replies), you MUST use the reviews API to submit all comments
-as a single review. Do NOT use `POST /repos/{owner}/{repo}/pulls/{pr}/comments` for individual
-comments — those create orphaned single-comment reviews that don't display inline in the "Files
-changed" view.
-
-Instead, accumulate all comments into a JSON file and submit them as one review:
+When creating NEW comment threads (not replies), add them to the pending review:
 
 ```bash
-# Build a JSON file with this structure:
-{
-  "event": "COMMENT",
-  "body": "Overall review summary",
-  "comments": [
-    {"path": "file.go", "line": 42, "side": "RIGHT", "body": "Comment text"},
-    ...
-  ]
-}
-
-# Submit:
-gh api repos/{owner}/{repo}/pulls/{pr}/reviews --input review.json
+gh api graphql -f query='
+mutation($reviewId: ID!, $path: String!, $body: String!, $line: Int!) {
+  addPullRequestReviewThread(input: {
+    pullRequestReviewId: $reviewId
+    path: $path
+    body: $body
+    line: $line
+    side: RIGHT
+  }) {
+    thread { id }
+  }
+}' -f reviewId="$REVIEW_NODE_ID" -f path="relative/path/to/file" -f body="🤖 Comment" -F line=42
 ```
 
-The `line` is the absolute line number in the file (new version). Use `side: "RIGHT"` for
-commenting on new/changed lines. Comments can only be placed on lines within the PR diff.
+Rules:
+- `line` is the absolute line number in the new version of the file.
+- `side: RIGHT` always.
+- The line must be within a diff hunk for that file.
+- `path` is relative to the repo root.
+
+NEVER use `POST /repos/{owner}/{repo}/pulls/{pr}/comments` for individual comments — those create
+orphaned single-comment reviews that bypass the pending review.
+
+
+# Procedure
+
+1. Make sure you understand the purpose of the repository and have an appropriate amount of context.
+
+2. Use `gh pr diff` to read the full diff. Then **read all changed files completely** for full
+   context — understand the surrounding code, not just the diff lines.
+
+3. Fetch all review threads using the GraphQL query above.
+
+4. For each **unresolved** thread where the last comment is by a human (not 🤖): determine whether
+   it requires a response. If it does, reply within the thread. If appropriate, make a commit
+   addressing the issue and push it.
+
+5. Skip resolved threads. Skip threads where the last comment is by an AI agent (🤖).
+
+6. Stop and inform the user that you've finished responding to outstanding comments.
