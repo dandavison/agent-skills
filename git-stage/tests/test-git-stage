@@ -1,0 +1,440 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pytest", "unidiff"]
+# ///
+
+"""Tests for git-stage: diff parsing, patch construction, and integration."""
+
+from __future__ import annotations
+
+import importlib.machinery
+import importlib.util
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+_script = Path(__file__).parent.parent / "scripts" / "git-stage"
+_loader = importlib.machinery.SourceFileLoader("git_stage", str(_script))
+_spec = importlib.util.spec_from_loader("git_stage", _loader)
+assert _spec
+git_stage = importlib.util.module_from_spec(_spec)
+sys.modules["git_stage"] = git_stage
+_loader.exec_module(git_stage)
+
+parse_diff = git_stage.parse_diff
+build_hunk_patch = git_stage.build_hunk_patch
+build_partial_patch = git_stage.build_partial_patch
+build_file_patch = git_stage.build_file_patch
+fixup_counts = git_stage.fixup_counts
+adjust_new_starts = git_stage.adjust_new_starts
+parse_specs = git_stage.parse_specs
+apply_to_index = git_stage.apply_to_index
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+SIMPLE_DIFF = (
+    "diff --git foo.py foo.py\n"
+    "--- foo.py\n"
+    "+++ foo.py\n"
+    "@@ -1,4 +1,5 @@\n"
+    " def hello():\n"
+    '-    print("hello")\n'
+    '+    print("hello!")\n'
+    '+    print("extra")\n'
+    " \n"
+    " def world():\n"
+)
+
+TWO_HUNK_DIFF = (
+    "diff --git foo.py foo.py\n"
+    "--- foo.py\n"
+    "+++ foo.py\n"
+    "@@ -1,4 +1,5 @@\n"
+    " def hello():\n"
+    '-    print("hello")\n'
+    '+    print("hello!")\n'
+    '+    print("extra")\n'
+    " \n"
+    " def world():\n"
+    "@@ -10,3 +11,4 @@\n"
+    " def main():\n"
+    "     hello()\n"
+    "     world()\n"
+    '+    print("done")\n'
+)
+
+TWO_FILE_DIFF = (
+    "diff --git bar.py bar.py\n"
+    "--- bar.py\n"
+    "+++ bar.py\n"
+    "@@ -1,3 +1,4 @@\n"
+    " import sys\n"
+    "+import os\n"
+    " \n"
+    " def run():\n"
+    "diff --git foo.py foo.py\n"
+    "--- foo.py\n"
+    "+++ foo.py\n"
+    "@@ -1,2 +1,2 @@\n"
+    " def hello():\n"
+    '-    print("hello")\n'
+    '+    print("hello!")\n'
+)
+
+
+# ---------------------------------------------------------------------------
+# Unit: diff parsing
+# ---------------------------------------------------------------------------
+
+
+class TestParseDiff:
+    def test_single_hunk(self) -> None:
+        files = parse_diff(SIMPLE_DIFF)
+        assert len(files) == 1
+        assert files[0].path == "foo.py"
+        assert len(files[0].hunks) == 1
+        hunk = files[0].hunks[0]
+        assert hunk.hunk_id == 1
+        changed = [ln for ln in hunk.lines if ln.is_changed]
+        assert len(changed) == 3
+        assert changed[0].line_type == "-"
+        assert changed[1].line_type == "+"
+        assert changed[2].line_type == "+"
+
+    def test_two_hunks(self) -> None:
+        files = parse_diff(TWO_HUNK_DIFF)
+        assert len(files) == 1
+        assert len(files[0].hunks) == 2
+        assert files[0].hunks[0].hunk_id == 1
+        assert files[0].hunks[1].hunk_id == 2
+
+    def test_two_files(self) -> None:
+        files = parse_diff(TWO_FILE_DIFF)
+        assert len(files) == 2
+        assert files[0].path == "bar.py"
+        assert files[1].path == "foo.py"
+        assert files[0].hunks[0].hunk_id == 1
+        assert files[1].hunks[0].hunk_id == 2
+
+    def test_empty_diff(self) -> None:
+        assert parse_diff("") == []
+        assert parse_diff("  \n  ") == []
+
+    def test_line_sub_ids_sequential(self) -> None:
+        files = parse_diff(SIMPLE_DIFF)
+        hunk = files[0].hunks[0]
+        ids = [ln.sub_id for ln in hunk.lines]
+        assert ids == list(range(1, len(hunk.lines) + 1))
+
+
+# ---------------------------------------------------------------------------
+# Unit: patch construction
+# ---------------------------------------------------------------------------
+
+
+class TestBuildHunkPatch:
+    def test_roundtrip(self) -> None:
+        files = parse_diff(SIMPLE_DIFF)
+        patch = build_hunk_patch(files[0].hunks[0])
+        assert patch.startswith("@@")
+        assert '-    print("hello")' in patch
+        assert '+    print("hello!")' in patch
+
+
+class TestBuildPartialPatch:
+    def test_select_addition_only(self) -> None:
+        files = parse_diff(SIMPLE_DIFF)
+        hunk = files[0].hunks[0]
+        # Select only the + lines (sub_ids 3 and 4), not the - line (sub_id 2)
+        changed = [ln for ln in hunk.lines if ln.is_changed]
+        plus_ids = {ln.sub_id for ln in changed if ln.line_type == "+"}
+        patch = build_partial_patch(hunk, plus_ids)
+        # The - line should be converted to context
+        assert '-    print("hello")' not in patch
+        assert '+    print("hello!")' in patch
+        assert '+    print("extra")' in patch
+
+    def test_select_all_changed(self) -> None:
+        """Selecting all changed lines should produce a valid full-hunk patch."""
+        files = parse_diff(SIMPLE_DIFF)
+        hunk = files[0].hunks[0]
+        all_ids = {ln.sub_id for ln in hunk.lines if ln.is_changed}
+        patch = build_partial_patch(hunk, all_ids)
+        assert '-    print("hello")' in patch
+        assert '+    print("hello!")' in patch
+
+
+class TestFixupCounts:
+    def test_recalculates_header(self) -> None:
+        # 2 old lines (1 context + 1 removal), 2 new lines (1 context + 1 addition)
+        patch = "@@ -10,999 +20,999 @@\n context\n-removed\n+added"
+        fixed = fixup_counts(patch)
+        assert fixed.startswith("@@ -10,2 +20,2 @@")
+
+    def test_preserves_trailer(self) -> None:
+        patch = "@@ -1,1 +1,1 @@ def foo\n context"
+        fixed = fixup_counts(patch)
+        assert fixed.startswith("@@ -1,1 +1,1 @@ def foo")
+
+
+class TestAdjustNewStarts:
+    def test_no_offset(self) -> None:
+        hunks = ["@@ -5,3 +5,3 @@\n context"]
+        assert adjust_new_starts(hunks) == hunks
+
+    def test_offset_applied(self) -> None:
+        # If first hunk has old_start=10, new_start=12, offset=2
+        # Second hunk with new_start=25 should become 23
+        hunks = [
+            "@@ -10,3 +12,4 @@\n first",
+            "@@ -20,3 +25,4 @@\n second",
+        ]
+        adjusted = adjust_new_starts(hunks)
+        assert adjusted[0].startswith("@@ -10,3 +10,4 @@")
+        assert adjusted[1].startswith("@@ -20,3 +23,4 @@")
+
+
+class TestParseSpecs:
+    def test_whole_hunk(self) -> None:
+        specs = parse_specs(["3"])
+        assert len(specs) == 1
+        assert specs[0].hunk_id == 3
+        assert specs[0].line_sub_ids is None
+
+    def test_line_specs(self) -> None:
+        specs = parse_specs(["1.3,1.4"])
+        assert len(specs) == 1
+        assert specs[0].hunk_id == 1
+        assert specs[0].line_sub_ids == {3, 4}
+
+    def test_mixed(self) -> None:
+        specs = parse_specs(["1.3,1.4", "3"])
+        assert len(specs) == 2
+        assert specs[0].hunk_id == 1
+        assert specs[0].line_sub_ids == {3, 4}
+        assert specs[1].hunk_id == 3
+        assert specs[1].line_sub_ids is None
+
+    def test_whole_hunk_overrides_lines(self) -> None:
+        specs = parse_specs(["1.3", "1"])
+        assert len(specs) == 1
+        assert specs[0].hunk_id == 1
+        assert specs[0].line_sub_ids is None
+
+
+# ---------------------------------------------------------------------------
+# Integration: real git repo
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def git_repo(tmp_path: Path) -> Path:
+    """Create a git repo with an initial commit."""
+    env = {**os.environ, "GIT_PAGER": "cat"}
+    subprocess.run(
+        ["git", "init"], cwd=tmp_path, capture_output=True, check=True, env=env
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+    (tmp_path / "foo.py").write_text(
+        "def hello():\n    print('hello')\n\ndef world():\n    print('world')\n"
+    )
+    (tmp_path / "bar.py").write_text("import sys\n\ndef run():\n    sys.exit(0)\n")
+    subprocess.run(
+        ["git", "add", "."], cwd=tmp_path, capture_output=True, check=True, env=env
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        env=env,
+    )
+    return tmp_path
+
+
+def _run_git_stage(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    script = Path(__file__).parent.parent / "scripts" / "git-stage"
+    return subprocess.run(
+        [str(script), *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _git(repo: Path, *args: str) -> str:
+    r = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "GIT_PAGER": "cat"},
+    )
+    return r.stdout
+
+
+class TestIntegrationStageHunk:
+    def test_stage_single_hunk(self, git_repo: Path) -> None:
+        (git_repo / "foo.py").write_text(
+            "def hello():\n    print('hello!')\n\ndef world():\n    print('world')\n"
+        )
+        (git_repo / "bar.py").write_text(
+            "import sys\nimport os\n\ndef run():\n    sys.exit(0)\n"
+        )
+        # Stage only the bar.py hunk
+        r = _run_git_stage(git_repo, "diff")
+        assert r.returncode == 0
+        # Find the bar.py hunk ID
+        lines = r.stdout.split("\n")
+        bar_hunk_id = None
+        for line in lines:
+            if "bar.py" in line and line.strip().startswith("File:"):
+                # Next hunk line has the ID
+                continue
+            if "Hunk" in line and bar_hunk_id is None:
+                bar_hunk_id = line.strip().split()[1]
+                break
+        assert bar_hunk_id is not None
+
+        r = _run_git_stage(git_repo, "stage", bar_hunk_id)
+        assert r.returncode == 0
+
+        staged = _git(git_repo, "diff", "--cached", "--stat")
+        unstaged = _git(git_repo, "diff", "--stat")
+        assert "bar.py" in staged
+        assert "foo.py" not in staged
+        assert "foo.py" in unstaged
+
+    def test_stage_line_level(self, git_repo: Path) -> None:
+        (git_repo / "foo.py").write_text(
+            "def hello():\n    print('hello!')\n    print('extra')\n\n"
+            "def world():\n    print('world!')\n"
+        )
+        r = _run_git_stage(git_repo, "diff")
+        assert r.returncode == 0
+
+        # Find changed line IDs for the hello change (not world)
+        lines = r.stdout.split("\n")
+        hello_ids = []
+        for line in lines:
+            line = line.strip()
+            if not line or "|" not in line:
+                continue
+            parts = line.split("|", 1)
+            tag = parts[0].strip()
+            content = parts[1].strip() if len(parts) > 1 else ""
+            if "." in tag and ("hello" in content or "extra" in content):
+                hello_ids.append(tag.rstrip(" +-"))
+        assert len(hello_ids) >= 2
+
+        r = _run_git_stage(git_repo, "stage", ",".join(hello_ids))
+        assert r.returncode == 0
+
+        cached = _git(git_repo, "diff", "--cached", "--no-prefix")
+        assert "+    print('hello!')" in cached
+        assert "+    print('world!')" not in cached
+
+    def test_unstage_all(self, git_repo: Path) -> None:
+        (git_repo / "foo.py").write_text("def hello():\n    print('changed')\n")
+        _git(git_repo, "add", ".")
+        r = _run_git_stage(git_repo, "unstage")
+        assert r.returncode == 0
+        staged = _git(git_repo, "diff", "--cached", "--stat")
+        assert staged.strip() == ""
+
+    def test_unstage_specific_lines(self, git_repo: Path) -> None:
+        (git_repo / "foo.py").write_text(
+            "def hello():\n    print('hello!')\n\ndef world():\n    print('world!')\n"
+        )
+        _git(git_repo, "add", ".")
+
+        # Unstage only the world change
+        r = _run_git_stage(git_repo, "diff", "--cached")
+        assert r.returncode == 0
+        lines = r.stdout.split("\n")
+        world_ids = []
+        for line in lines:
+            line = line.strip()
+            if not line or "|" not in line:
+                continue
+            parts = line.split("|", 1)
+            tag = parts[0].strip()
+            content = parts[1].strip() if len(parts) > 1 else ""
+            if "." in tag and "world" in content:
+                world_ids.append(tag.rstrip(" +-"))
+        assert len(world_ids) >= 1
+
+        r = _run_git_stage(git_repo, "unstage", ",".join(world_ids))
+        assert r.returncode == 0
+
+        cached = _git(git_repo, "diff", "--cached", "--no-prefix")
+        assert "+    print('hello!')" in cached
+        assert "+    print('world!')" not in cached
+
+    def test_status(self, git_repo: Path) -> None:
+        (git_repo / "foo.py").write_text("def hello():\n    print('changed')\n")
+        r = _run_git_stage(git_repo, "status")
+        assert r.returncode == 0
+        assert "Unstaged: 1 hunk" in r.stdout
+        assert "Staged:   0 hunk" in r.stdout
+
+    def test_full_workflow(self, git_repo: Path) -> None:
+        """Stage group A, commit, stage group B, commit — verify git log."""
+        (git_repo / "foo.py").write_text(
+            "def hello():\n    print('hello!')\n\ndef world():\n    print('world!')\n"
+        )
+        (git_repo / "bar.py").write_text(
+            "import sys\nimport os\n\ndef run():\n    sys.exit(0)\n"
+        )
+
+        r = _run_git_stage(git_repo, "diff")
+        assert r.returncode == 0
+
+        # Stage first hunk (bar.py)
+        r = _run_git_stage(git_repo, "stage", "1")
+        assert r.returncode == 0
+        _git(git_repo, "commit", "-m", "bar changes")
+
+        # Stage remaining
+        r = _run_git_stage(git_repo, "stage", "1")
+        assert r.returncode == 0
+        _git(git_repo, "commit", "-m", "foo changes")
+
+        log = _git(git_repo, "log", "--oneline")
+        assert "bar changes" in log
+        assert "foo changes" in log
+        assert _git(git_repo, "diff").strip() == ""
+        assert _git(git_repo, "diff", "--cached").strip() == ""
+
+
+if __name__ == "__main__":
+    # pytest requires .py extension for collection; create a temporary symlink
+    link = Path(__file__).with_suffix(".py")
+    link.unlink(missing_ok=True)
+    link.symlink_to(Path(__file__).resolve())
+    try:
+        sys.exit(pytest.main([str(link), "-v"]))
+    finally:
+        link.unlink(missing_ok=True)
