@@ -1,0 +1,431 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["unidiff"]
+# ///
+
+"""Hunk and line-level git staging, following magit's plumbing patterns.
+
+Subcommands:
+  diff              Show unstaged changes as numbered hunks with line sub-IDs
+  stage <specs...>  Stage hunks or individual lines by ID
+  unstage [specs..] Unstage hunks/lines (or everything if no specs)
+  status            Summary of staged/unstaged state
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from typing import TextIO
+
+from unidiff import PatchSet
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DiffLine:
+    """A single line within a hunk."""
+
+    sub_id: int
+    line_type: str  # '+', '-', ' '
+    content: str  # includes the type prefix character
+    is_changed: bool
+
+    @property
+    def raw(self) -> str:
+        return self.content
+
+
+@dataclass
+class DiffHunk:
+    """A hunk within a file diff."""
+
+    hunk_id: int
+    header: str  # the @@ ... @@ line
+    source_start: int
+    source_length: int
+    target_start: int
+    target_length: int
+    lines: list[DiffLine] = field(default_factory=list)
+
+    @property
+    def raw(self) -> str:
+        return self.header + "\n" + "".join(ln.raw + "\n" for ln in self.lines)
+
+
+@dataclass
+class FileDiff:
+    """All hunks for one file."""
+
+    path: str
+    file_header: str  # --- / +++ lines (no-prefix format)
+    hunks: list[DiffHunk] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Diff parsing
+# ---------------------------------------------------------------------------
+
+
+def git_diff(cached: bool = False) -> str:
+    args = ["git", "diff", "--no-prefix"]
+    if cached:
+        args.append("--cached")
+    r = subprocess.run(args, capture_output=True, text=True, check=True)
+    return r.stdout
+
+
+def parse_diff(diff_text: str) -> list[FileDiff]:
+    if not diff_text.strip():
+        return []
+    patch = PatchSet(diff_text)
+    files: list[FileDiff] = []
+    hunk_counter = 0
+    for pf in patch:
+        header = f"--- {pf.source_file}\n+++ {pf.target_file}\n"
+        # unidiff may include a/ b/ prefixes even with --no-prefix if the diff
+        # header has them; strip to bare paths for -p0 compatibility
+        header = re.sub(r"^(---|\+\+\+) [ab]/", r"\1 ", header, flags=re.MULTILINE)
+        fd = FileDiff(path=pf.path, file_header=header)
+        for uh in pf:
+            hunk_counter += 1
+            hunk = DiffHunk(
+                hunk_id=hunk_counter,
+                header=str(uh).split("\n", 1)[0],
+                source_start=uh.source_start,
+                source_length=uh.source_length,
+                target_start=uh.target_start,
+                target_length=uh.target_length,
+            )
+            sub_id = 0
+            for line in uh:
+                sub_id += 1
+                lt = " "
+                if line.is_added:
+                    lt = "+"
+                elif line.is_removed:
+                    lt = "-"
+                raw = lt + line.value.rstrip("\n")
+                hunk.lines.append(
+                    DiffLine(
+                        sub_id=sub_id,
+                        line_type=lt,
+                        content=raw,
+                        is_changed=line.is_added or line.is_removed,
+                    )
+                )
+            fd.hunks.append(hunk)
+        files.append(fd)
+    return files
+
+
+# ---------------------------------------------------------------------------
+# Patch construction (following magit's patterns)
+# ---------------------------------------------------------------------------
+
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
+
+
+def fixup_counts(hunk_text: str) -> str:
+    """Recalculate @@ header line counts from actual patch content (diff-fixup-modifs)."""
+    lines = hunk_text.split("\n")
+    if not lines or not lines[0].startswith("@@"):
+        return hunk_text
+    m = _HUNK_HEADER_RE.match(lines[0])
+    if not m:
+        return hunk_text
+    body = [ln for ln in lines[1:] if ln]
+    old_count = sum(1 for ln in body if ln and ln[0] in (" ", "-"))
+    new_count = sum(1 for ln in body if ln and ln[0] in (" ", "+"))
+    src_start, _, tgt_start, _, rest = (
+        m.group(1),
+        m.group(2),
+        m.group(3),
+        m.group(4),
+        m.group(5),
+    )
+    header = f"@@ -{src_start},{old_count} +{tgt_start},{new_count} @@{rest}"
+    return header + "\n" + "\n".join(lines[1:])
+
+
+def adjust_new_starts(hunk_texts: list[str]) -> list[str]:
+    """Adjust +N in @@ headers for partial hunk application (magit algorithm)."""
+    if not hunk_texts:
+        return hunk_texts
+    m = _HUNK_HEADER_RE.match(hunk_texts[0].split("\n", 1)[0])
+    if not m:
+        return hunk_texts
+    offset = int(m.group(3)) - int(m.group(1))
+    if offset == 0:
+        return hunk_texts
+    result = []
+    for ht in hunk_texts:
+        m2 = _HUNK_HEADER_RE.match(ht.split("\n", 1)[0])
+        if not m2:
+            result.append(ht)
+            continue
+        new_start = int(m2.group(3)) - offset
+        old_header = m2.group(0)
+        new_header = re.sub(
+            r"\+\d+",
+            f"+{new_start}",
+            old_header,
+            count=1,
+        )
+        result.append(ht.replace(old_header, new_header, 1))
+    return result
+
+
+def build_hunk_patch(hunk: DiffHunk) -> str:
+    """Full hunk as a patch fragment."""
+    return hunk.raw
+
+
+def build_partial_patch(
+    hunk: DiffHunk, selected_sub_ids: set[int], reverse: bool = False
+) -> str:
+    """Build a partial-hunk patch selecting only specific changed lines.
+
+    Follows magit-diff-hunk-region-patch:
+    - Context lines: always keep
+    - Selected changed lines: keep
+    - Unselected '+' lines: drop (or convert to context if reverse)
+    - Unselected '-' lines: convert to context (or drop if reverse)
+    """
+    op = "+" if reverse else "-"
+    patch_lines = [hunk.header]
+    for line in hunk.lines:
+        if line.line_type == " ":
+            patch_lines.append(line.content)
+        elif line.sub_id in selected_sub_ids:
+            patch_lines.append(line.content)
+        elif line.line_type == op:
+            # Convert to context: replace leading type char with space
+            patch_lines.append(" " + line.content[1:])
+        # else: drop the line (unselected, opposite type to op)
+    return fixup_counts("\n".join(patch_lines))
+
+
+def build_file_patch(fd: FileDiff, hunk_patches: list[str]) -> str:
+    """Assemble file header + adjusted hunk patches."""
+    adjusted = adjust_new_starts(hunk_patches)
+    return fd.file_header + "\n".join(adjusted)
+
+
+# ---------------------------------------------------------------------------
+# Git operations
+# ---------------------------------------------------------------------------
+
+
+def apply_to_index(patch_text: str, reverse: bool = False) -> None:
+    if not patch_text.endswith("\n"):
+        patch_text += "\n"
+    args = ["git", "apply", "--cached", "-p0", "-C3", "--ignore-space-change", "-"]
+    if reverse:
+        args.insert(2, "--reverse")
+    r = subprocess.run(args, input=patch_text, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"error: git apply failed:\n{r.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+
+
+def git_reset_head() -> None:
+    subprocess.run(["git", "reset", "HEAD"], capture_output=True, text=True, check=True)
+
+
+# ---------------------------------------------------------------------------
+# Spec parsing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StagingSpec:
+    hunk_id: int
+    line_sub_ids: set[int] | None  # None = whole hunk
+
+
+def parse_specs(specs: list[str]) -> list[StagingSpec]:
+    """Parse specs like '3', '1.3', '1.4' into StagingSpecs."""
+    by_hunk: dict[int, set[int] | None] = {}
+    for s in specs:
+        for part in s.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "." in part:
+                hunk_s, line_s = part.split(".", 1)
+                hid = int(hunk_s)
+                lid = int(line_s)
+                if by_hunk.get(hid) is None and hid in by_hunk:
+                    continue  # already whole-hunk
+                by_hunk.setdefault(hid, set()).add(lid)  # type: ignore[union-attr]
+            else:
+                hid = int(part)
+                by_hunk[hid] = None  # whole hunk
+    return [
+        StagingSpec(hunk_id=h, line_sub_ids=ls) for h, ls in sorted(by_hunk.items())
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Command: diff
+# ---------------------------------------------------------------------------
+
+
+def cmd_diff(args: argparse.Namespace) -> None:
+    diff_text = git_diff(cached=args.cached)
+    if not diff_text.strip():
+        what = "staged" if args.cached else "unstaged"
+        print(f"No {what} changes.")
+        return
+    files = parse_diff(diff_text)
+    print_diff(files, sys.stdout)
+
+
+def print_diff(files: list[FileDiff], out: TextIO) -> None:
+    for fd in files:
+        out.write(f"\nFile: {fd.path}\n")
+        for hunk in fd.hunks:
+            out.write(f"\n  Hunk {hunk.hunk_id} {hunk.header}\n")
+            for line in hunk.lines:
+                marker = line.line_type if line.is_changed else " "
+                if line.is_changed:
+                    tag = f"{hunk.hunk_id}.{line.sub_id}"
+                    out.write(f"    {tag:>6} {marker}| {line.content[1:]}\n")
+                else:
+                    out.write(f"           {marker}| {line.content[1:]}\n")
+
+
+# ---------------------------------------------------------------------------
+# Command: stage / unstage
+# ---------------------------------------------------------------------------
+
+
+def cmd_stage(args: argparse.Namespace) -> None:
+    do_stage(args.specs, reverse=False)
+
+
+def cmd_unstage(args: argparse.Namespace) -> None:
+    if not args.specs:
+        git_reset_head()
+        print("Unstaged all changes.")
+        return
+    do_stage(args.specs, reverse=True)
+
+
+def do_stage(raw_specs: list[str], reverse: bool) -> None:
+    cached = reverse  # unstaging reads from --cached diff
+    diff_text = git_diff(cached=cached)
+    if not diff_text.strip():
+        what = "staged" if cached else "unstaged"
+        print(f"No {what} changes to work with.")
+        return
+    files = parse_diff(diff_text)
+    specs = parse_specs(raw_specs)
+
+    hunk_map: dict[int, tuple[FileDiff, DiffHunk]] = {}
+    for fd in files:
+        for h in fd.hunks:
+            hunk_map[h.hunk_id] = (fd, h)
+
+    for spec in specs:
+        if spec.hunk_id not in hunk_map:
+            print(f"error: hunk {spec.hunk_id} not found", file=sys.stderr)
+            sys.exit(1)
+        if spec.line_sub_ids is not None:
+            _, hunk = hunk_map[spec.hunk_id]
+            valid = {ln.sub_id for ln in hunk.lines if ln.is_changed}
+            bad = spec.line_sub_ids - valid
+            if bad:
+                print(
+                    f"error: line IDs {bad} not found in hunk {spec.hunk_id}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+    # Group by file, preserving hunk order
+    file_specs: dict[str, list[tuple[DiffHunk, StagingSpec]]] = {}
+    for spec in specs:
+        fd, hunk = hunk_map[spec.hunk_id]
+        file_specs.setdefault(fd.path, []).append((hunk, spec))
+
+    for path, hunk_specs in file_specs.items():
+        fd = next(f for f in files if f.path == path)
+        patches: list[str] = []
+        for hunk, spec in hunk_specs:
+            if spec.line_sub_ids is None:
+                patches.append(build_hunk_patch(hunk))
+            else:
+                patches.append(
+                    build_partial_patch(hunk, spec.line_sub_ids, reverse=reverse)
+                )
+        patch = build_file_patch(fd, patches)
+        apply_to_index(patch, reverse=reverse)
+
+    action = "Unstaged" if reverse else "Staged"
+    desc = ", ".join(raw_specs)
+    print(f"{action}: {desc}")
+
+
+# ---------------------------------------------------------------------------
+# Command: status
+# ---------------------------------------------------------------------------
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    unstaged = git_diff(cached=False)
+    staged = git_diff(cached=True)
+    u_files = parse_diff(unstaged)
+    s_files = parse_diff(staged)
+    u_hunks = sum(len(f.hunks) for f in u_files)
+    s_hunks = sum(len(f.hunks) for f in s_files)
+    print(f"Unstaged: {u_hunks} hunk(s) across {len(u_files)} file(s)")
+    print(f"Staged:   {s_hunks} hunk(s) across {len(s_files)} file(s)")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Hunk and line-level git staging (magit-style plumbing)"
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_diff = sub.add_parser("diff", help="Show changes as numbered hunks")
+    p_diff.add_argument(
+        "--cached", action="store_true", help="Show staged changes instead of unstaged"
+    )
+
+    p_stage = sub.add_parser("stage", help="Stage hunks or lines by ID")
+    p_stage.add_argument("specs", nargs="+", help="Hunk or line specs (e.g. 3 1.3,1.4)")
+
+    p_unstage = sub.add_parser("unstage", help="Unstage hunks/lines or everything")
+    p_unstage.add_argument("specs", nargs="*", help="Specs to unstage (omit for all)")
+
+    sub.add_parser("status", help="Summary of staged/unstaged state")
+
+    args = parser.parse_args()
+    match args.command:
+        case "diff":
+            cmd_diff(args)
+        case "stage":
+            cmd_stage(args)
+        case "unstage":
+            cmd_unstage(args)
+        case "status":
+            cmd_status(args)
+
+
+if __name__ == "__main__":
+    main()
