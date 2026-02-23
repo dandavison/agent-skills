@@ -5,20 +5,7 @@ description: |
   Triggers: "review", "pr", "code review"
 ---
 
-Use the `gh` CLI tool to interact with GitHub.
-
-If the current branch has no associated PR, then stop and inform the user.
-
-Otherwise, use `gh` to determine the state of the PR.
-
-You may only continue if the PR is open and in Draft mode and there are no comments by anyone other
-than me (@dandavison).
-
-Otherwise (e.g. PR merged or closed, comments by others, or you were unable to determine state)
-stop and inform the user.
-
-The instructions below assume that you have determined that it's OK to proceed. First some general
-considerations:
+First some general considerations:
 
 - Start all your comments with the 🤖 emoji.
 
@@ -28,20 +15,23 @@ considerations:
 
 # Pending review
 
-All comments must be posted to a pending (draft) review. Find or create one:
+All comments must be posted to a pending (draft) review that you create. First, check that no
+pending review already exists:
 
 ```bash
-# Determine owner, repo, and PR number
 OWNER=... REPO=... NUMBER=...
 
-# Find existing pending review
-REVIEW_NODE_ID=$(gh api repos/$OWNER/$REPO/pulls/$NUMBER/reviews \
+EXISTING=$(gh api repos/$OWNER/$REPO/pulls/$NUMBER/reviews \
   --jq '[.[] | select(.state == "PENDING")] | first | .node_id // empty')
+```
 
-# If none exists, create one
-if [ -z "$REVIEW_NODE_ID" ]; then
-  REVIEW_NODE_ID=$(gh api repos/$OWNER/$REPO/pulls/$NUMBER/reviews --jq '.node_id')
-fi
+If `$EXISTING` is non-empty, stop and inform the user: "A pending review already exists." Do not
+proceed.
+
+Otherwise, create a new pending review:
+
+```bash
+REVIEW_NODE_ID=$(gh api -X POST repos/$OWNER/$REPO/pulls/$NUMBER/reviews --jq '.node_id')
 ```
 
 Never submit the review. Never delete a review. The human decides when to make it visible.
@@ -90,17 +80,32 @@ NEVER use `POST /repos/{owner}/{repo}/pulls/{pr}/comments` for individual commen
 orphaned single-comment reviews that bypass the pending review.
 
 
+# Preconditions
+
+Use `gh` to determine the state of the PR. If no PR exists or it is closed, stop and tell the user.
+
+The PR MUST correspond to the currently checked out branch in the current local repository, because
+you are going to use the local repository to gather context for the PR review. If it does not, STOP
+and tell the user. Do NOT proceed with the review under any circumstances, even if you think you
+would be able to do the review task adequately.
+
+
 # Review procedure
 
 1. Make sure you understand the purpose of the repository and have an appropriate amount of context.
 
-2. Use `gh pr diff` to read the full diff. Then **read all changed files completely** for full
+2. Try to create a pending Review using the instructions above.
+
+3. Use `gh pr diff` to read the full diff. Then **read all changed files completely** for full
    context — understand the surrounding code, not just the diff lines.
 
-3. Review the parts of the diff that change documentation and docstrings. Comment on individual
+4. Do you understand the intent of the PR? Is the intent what it should be? Is it basically doing
+   what it intends?
+
+5. Review the parts of the diff that change documentation and docstrings. Comment on individual
    lines as you see fit.
 
-4. Review the parts of the diff that change test coverage, commenting on individual lines as you see
+6. Review the parts of the diff that change test coverage, commenting on individual lines as you see
    fit. In general, a test suite should be passing if and only if the implementation defines correct
    behavior of the feature. Consider the following as possible reasons to comment:
    - Are there any important ways that the behavior of the feature could be incorrect without
@@ -113,13 +118,13 @@ orphaned single-comment reviews that bypass the pending review.
      sometimes appropriate for testing detailed logic, but be skeptical of them, especially when they
      employ mocking techniques.
 
-5. Review error messages, commenting on individual lines as you see fit. These should be concise,
+7. Review error messages, commenting on individual lines as you see fit. These should be concise,
    well-written, and should instruct the user both what went wrong and how to address it, while
    avoiding verbosity. Consider the following as possible reasons to comment:
    - Are there any ways in which the feature could be used wrongly without resulting in an
      appropriate error message?
 
-6. Review the actual implementation. Consider the following as possible reasons to comment:
+8. Review the actual implementation. Consider the following as possible reasons to comment:
    - For each area implemented, can you find related implementation in the repository? If so, are
      the two consistent? Can the implementation being reviewed benefit from the existing code? Or are
      you aware of canonical or well-respected implementations of something very similar outside the
@@ -133,8 +138,8 @@ orphaned single-comment reviews that bypass the pending review.
    - Any performance or security concerns?
    - Is the code in the right place?
 
-7. Set the review body to an overall comment regarding the PR. Comment on whether you think what it
+9. Set the review body to an overall comment regarding the PR. Comment on whether you think what it
    is trying to do is what it should be trying to do. Comment on the extent to which it has achieved
    those two things: what more is needed? If there are any serious problems with the PR, or it
-   appears to be going in an inappropriate direction then say so. If there is anything unusually good
-   about the PR then say so, but do this only in exceptional cases.
+   appears to be going in an inappropriate direction then say so. If there is anything unusually
+   good about the PR then say so, but do this only in exceptional cases.

@@ -5,20 +5,7 @@ description: |
   Triggers: "respond to comments"
 ---
 
-Use the `gh` CLI tool to interact with GitHub.
-
-If the current branch has no associated PR, then stop and inform the user.
-
-Otherwise, use `gh` to determine the state of the PR.
-
-You may only continue if the PR is open and in Draft mode and there are no comments by anyone other
-than me (@dandavison).
-
-Otherwise (e.g. PR merged or closed, comments by others, or you were unable to determine state)
-stop and inform the user.
-
-The instructions below assume that you have determined that it's OK to proceed. First some general
-considerations:
+First some general considerations:
 
 - Start all your comments with the 🤖 emoji.
 
@@ -140,12 +127,16 @@ orphaned single-comment reviews that bypass the pending review.
 
 1. Make sure you understand the purpose of the repository and have an appropriate amount of context.
 
-2. Use `gh pr diff` to read the full diff. Then **read all changed files completely** for full
+2. Use `gh` to determine the state of the PR. If no PR exists or it is closed then stop and tell the
+   user. If the PR does not correspond to the currently checked out branch in the current repository
+   then stop and tell the user.
+
+3. Use `gh pr diff` to read the full diff. Then **read all changed files completely** for full
    context — understand the surrounding code, not just the diff lines.
 
-3. Fetch all review threads using the GraphQL query above.
+4. Fetch all review threads using the GraphQL query above.
 
-4. For each **unresolved** thread, examine the full comment history. Identify any human comments
+5. For each **unresolved** thread, examine the full comment history. Identify any human comments
    that have not been adequately addressed by a subsequent 🤖 response. If there are such
    comments, respond to them. (Note: a single 🤖 response may address multiple preceding human
    comments; conversely, a 🤖 response that only addresses one of several human comments leaves
@@ -154,7 +145,7 @@ orphaned single-comment reviews that bypass the pending review.
    must repro it and then create a failing test, and commit that, before committing a fix for the
    bug.
 
-5. Skip resolved threads. Skip threads where every human comment has been adequately addressed by
+6. Skip resolved threads. Skip threads where every human comment has been adequately addressed by
    a subsequent 🤖 response.
 
-6. Stop and inform the user that you've finished responding to outstanding comments.
+7. Stop and inform the user that you've finished responding to outstanding comments.
