@@ -28,10 +28,12 @@ EXISTING=$(gh api repos/$OWNER/$REPO/pulls/$NUMBER/reviews \
 If `$EXISTING` is non-empty, stop and inform the user: "A pending review already exists." Do not
 proceed.
 
-Otherwise, create a new pending review:
+Otherwise, create a new pending review. A body must be supplied at creation time; without one,
+the body becomes permanently uneditable via the API.
 
 ```bash
-REVIEW_NODE_ID=$(gh api -X POST repos/$OWNER/$REPO/pulls/$NUMBER/reviews --jq '.node_id')
+REVIEW_NODE_ID=$(gh api -X POST repos/$OWNER/$REPO/pulls/$NUMBER/reviews \
+  -f body='🤖 Review in progress' --jq '.node_id')
 ```
 
 Never submit the review. Never delete a review. The human decides when to make it visible.
