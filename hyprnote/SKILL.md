@@ -28,7 +28,7 @@ hyprnote-search get "8d190e4d"
 hyprnote-search get "oncall handoff"
 ```
 
-The script is at: `~/.cursor/skills/hyprnote/scripts/hyprnote-search`
+The script is at: `~/.agents/skills/hyprnote/scripts/hyprnote-search`
 
 ## Output format
 

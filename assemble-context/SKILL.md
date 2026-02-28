@@ -21,7 +21,7 @@ main conversation stays clean; context arrives as a file you can reference with 
    - **Git repos** — at `~/src/temporal-all/repos` and any other relevant repos
    - **Temporal docs** — via `user-temporal-docs` MCP (requires auth first)
    - **Meeting notes** — via `notion-query-meeting-notes`
-   - **Meeting transcripts** — via `hyprnote-search` CLI (see `~/.cursor/skills/hyprnote/SKILL.md`)
+   - **Meeting transcripts** — via `hyprnote-search` CLI (see `~/.agents/skills/hyprnote/SKILL.md`)
    - **Temporal Cloud operational details** - via `oncall` repo
 
 3. Launch a `generalPurpose` subagent using the Task tool. Pass it a prompt

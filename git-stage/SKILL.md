@@ -15,7 +15,7 @@ description: |
 Hunk and line-level git staging via `git apply --cached -p0`, following magit's
 plumbing patterns.
 
-The script is at: `~/.cursor/skills/git-stage/scripts/git-stage`
+The script is at: `~/.agents/skills/git-stage/scripts/git-stage`
 
 ## Commands
 
