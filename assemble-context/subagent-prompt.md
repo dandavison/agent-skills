@@ -96,14 +96,14 @@ Repos are at `~/src/temporal-all/repos`. Use Grep, Glob, SemanticSearch, and
 Read tools to search for relevant code, docs, and configuration.
 
 #### Meeting transcripts (Hyprnote)
-Use the `hyprnote-search` CLI at `~/.cursor/skills/hyprnote/scripts/hyprnote-search`:
+Use the `hyprnote-search` CLI at `~/.agents/skills/hyprnote/scripts/hyprnote-search`:
 
 ```bash
 # Search transcripts by keyword
-~/.cursor/skills/hyprnote/scripts/hyprnote-search search "<query>" --after <YYYY-MM-DD> --limit 5
+~/.agents/skills/hyprnote/scripts/hyprnote-search search "<query>" --after <YYYY-MM-DD> --limit 5
 
 # Get full transcript when an excerpt looks relevant
-~/.cursor/skills/hyprnote/scripts/hyprnote-search get "<session-id>"
+~/.agents/skills/hyprnote/scripts/hyprnote-search get "<session-id>"
 ```
 
 Transcripts can be very long. Summarize rather than including verbatim.

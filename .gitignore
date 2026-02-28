@@ -1,2 +1,7 @@
 __pycache__/
 uv.lock
+
+# 3rd-party skills (symlinks into this dir, not tracked in this repo)
+# Add entries here when installing 3rd-party skills:
+#   ln -s /path/to/3rdparty-skill ~/.agents/skills/<name>
+#   echo '<name>' >> .gitignore
