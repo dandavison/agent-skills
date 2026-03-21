@@ -1,0 +1,55 @@
+{
+  "skill_name": "oncall-lookup",
+  "evals": [
+    {
+      "id": 0,
+      "name": "alert-lookup",
+      "prompt": "I just got paged for PersistenceLatencySevereFiveMinutes on s-cd059. What should I check?",
+      "expected_output": "Specific triage steps for this alert including root causes, commands to run, dashboards to check, and when to escalate",
+      "files": [],
+      "assertions": [
+        {"text": "Response references the specific alert name PersistenceLatencySevereFiveMinutes"},
+        {"text": "Lists at least 2 concrete root causes (e.g., Astra node degradation, gocql heartbeat failures, large payload cache bypass, DB connectivity)"},
+        {"text": "Provides at least 1 specific CLI command or dashboard URL for triage"},
+        {"text": "States when to escalate vs when to watch for self-resolution"}
+      ]
+    },
+    {
+      "id": 1,
+      "name": "resourceexhausted-symptom",
+      "prompt": "We're seeing ResourceExhausted errors on a single namespace. Is this likely customer-side or platform-side?",
+      "expected_output": "Distinction between customer-side vs platform-side indicators, relevant checks to determine which, and appropriate next steps",
+      "files": [],
+      "assertions": [
+        {"text": "Explicitly addresses both customer-side and platform-side possibilities"},
+        {"text": "Notes that single namespace affected is a customer-side indicator"},
+        {"text": "Suggests checking rate limits (frontend.globalNamespaceRPS or APS/RPS limits)"},
+        {"text": "References Chronicle or fine-grained per-second metrics for verification"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "auto-resolution-stats",
+      "prompt": "Which alerts have the highest auto-resolution rate? I want to know which pages I can probably just watch.",
+      "expected_output": "List of alerts with high auto-resolution rates sourced from alert-stats.json, with specific percentages",
+      "files": [],
+      "assertions": [
+        {"text": "Includes specific auto-resolution percentages (not just qualitative high/low)"},
+        {"text": "Lists at least 3 specific alert names with their auto-resolution rates"},
+        {"text": "The auto-resolution rates cited are accurate per alert-stats.json data"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "cell-url-error",
+      "prompt": "I'm going to https://cloud.temporal.io/support/cells/s-saa-cogs but it says 'ERROR'D! ConnectError: [invalid_argument] unknown cell s-saa-cogs'. What is the right URL?",
+      "expected_output": "Explanation that s-saa-cogs is not a valid cell name, examples of real cell name formats (s-cd0XX, s-gc0XX, s-aw0XX, etc.), and how to find the correct cell name",
+      "files": [],
+      "assertions": [
+        {"text": "Explains that s-saa-cogs is not a valid cell name"},
+        {"text": "Provides examples of real cell name formats (s-cd0XX, s-gc0XX, s-aw0XX, etc.)"},
+        {"text": "Suggests a concrete way to find the correct cell name (e.g., omni command, listing cells, or checking dashboards)"}
+      ]
+    }
+  ]
+}
