@@ -21,10 +21,12 @@ Tools live at `~/src/audio-filter`. All commands use `uv run` from that director
 
 ```bash
 cd ~/src/audio-filter
-uv run transcribe --title "Session Name" --listen
+uv run transcribe --title "Session Name"
 ```
 
-- `--listen`: pass audio through to speakers (omit for silent capture)
+- `--listen`: pass audio through to speakers. **Only use this if the user is NOT
+  already hearing the meeting audio** (e.g. via headphones or speakers). If they
+  are, `--listen` causes echo/reverb. Omit it by default.
 - `--input "blackhole+speakers"`: use a specific aggregate device
 - Requires BlackHole as system audio output (or an aggregate device containing it)
 - Requires `HF_TOKEN` env var for pyannote diarization models
@@ -48,6 +50,39 @@ Or read the file directly using the Read tool. Format:
 ```
 
 To track incrementally, note the last line number read and read from there next time.
+
+## Live meeting companion mode
+
+When the user asks you to follow a meeting in real-time and give running summaries,
+use this procedure:
+
+### Setup
+1. Start transcription (see above). Do NOT use `--listen` sicne the user will be
+   hearing the meeting audio through headphones/speakers and it would cause echo.
+2. Note the initial line count of `~/meetings/live.txt` (may be 0).
+
+### Polling loop
+1. Launch a background Bash command: `sleep 60 && wc -l ~/meetings/live.txt`
+   (use `run_in_background: true`). This is your timer.
+2. When the timer completes, use the Read tool to read `~/meetings/live.txt`
+   from your last-read offset to the end.
+3. Output a **concise text summary** of the new content to the user. Focus on:
+   - Who is speaking and what topic they're on
+   - Key decisions, announcements, or questions raised
+   - Notable transitions (new presenter, new topic)
+4. Update your offset to the new line count.
+5. Go to step 1 (launch the next timer).
+
+### UX principles
+- **Minimize visible tool calls.** The user does not want to see a stream of
+  tool invocations. Use one background timer + one Read per cycle.
+- **Stay responsive.** If the user asks a question between polls, do a fresh
+  Read to catch up, answer their question, then resume the polling loop.
+- **Summaries, not transcripts.** Output 3-6 sentences per minute of content.
+  Lead with the speaker and topic. Skip filler, false starts, and "um/uh".
+- The transcription process may outlive background command timeouts — that's
+  fine. Check `ps -p $(cat ~/meetings/.transcribe.pid)` to verify it's alive
+  if you suspect it stopped.
 
 ## Stop transcription
 
