@@ -1,0 +1,23 @@
+{
+  "skill_name": "repro-creator",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "The POST /users endpoint is accepting malformed JSON bodies and returning 200 instead of an error. Can you create a repro?",
+      "expected_output": "A runnable script that starts the server, sends malformed JSON to POST /users, captures the response showing 200 + empty fields, and writes a markdown report.",
+      "files": ["repro-creator-workspace/fixtures/go-http-server/main.go", "repro-creator-workspace/fixtures/go-http-server/go.mod"]
+    },
+    {
+      "id": 1,
+      "prompt": "The list-items command is missing items — if I have 11 items and page size 5, I only see 10. Create a repro.",
+      "expected_output": "A runnable script that runs paginator.py with --count 11 --page-size 5, captures the output showing only 10 of 11 items, and writes a markdown report.",
+      "files": ["repro-creator-workspace/fixtures/python-paginator/paginator.py"]
+    },
+    {
+      "id": 2,
+      "prompt": "build.sh fails when run from a directory with spaces in the path. Can you repro this?",
+      "expected_output": "A runnable script that creates a temp directory with spaces in its name, copies the project there, runs build.sh, captures the error output, and writes a markdown report.",
+      "files": ["repro-creator-workspace/fixtures/shell-build/build.sh", "repro-creator-workspace/fixtures/shell-build/src/hello.c"]
+    }
+  ]
+}
