@@ -13,6 +13,7 @@ class OutputFormat(Enum):
 
 _SYMBOLS: dict[OperationType, str] = {
     OperationType.ADD: "+",
+    OperationType.MULTIPLY: "*",
 }
 
 
@@ -84,14 +85,33 @@ _register_renderer(VerboseRenderer())
 _DEFAULT_CTX = RenderContext(format=OutputFormat.PLAIN)
 
 
+def _render_operation(
+    op_type: OperationType,
+    a: float,
+    b: float,
+    fmt: OutputFormat = OutputFormat.PLAIN,
+    precision: int | None = None,
+) -> str:
+    op = _get_operation(op_type)
+    result = op.execute(a, b)
+    ctx = RenderContext(format=fmt, precision=precision)
+    renderer = _get_renderer(fmt)
+    return renderer.render(result, ctx)
+
+
 def render_addition(
     a: float,
     b: float,
     fmt: OutputFormat = OutputFormat.PLAIN,
     precision: int | None = None,
 ) -> str:
-    op = _get_operation(OperationType.ADD)
-    result = op.execute(a, b)
-    ctx = RenderContext(format=fmt, precision=precision)
-    renderer = _get_renderer(fmt)
-    return renderer.render(result, ctx)
+    return _render_operation(OperationType.ADD, a, b, fmt, precision)
+
+
+def render_multiplication(
+    a: float,
+    b: float,
+    fmt: OutputFormat = OutputFormat.PLAIN,
+    precision: int | None = None,
+) -> str:
+    return _render_operation(OperationType.MULTIPLY, a, b, fmt, precision)

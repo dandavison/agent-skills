@@ -10,6 +10,7 @@ class OperandValidationError(Exception):
 
 class OperationType(Enum):
     ADD = "add"
+    MULTIPLY = "multiply"
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,16 @@ class Addition(Operation):
         return sum(operands)
 
 
+class Multiplication(Operation):
+    operation_type = OperationType.MULTIPLY
+
+    def _compute(self, operands: tuple[float, ...]) -> float:
+        result = 1.0
+        for o in operands:
+            result *= o
+        return result
+
+
 _REGISTRY: dict[OperationType, Operation] = {}
 
 
@@ -78,8 +89,14 @@ def _get_operation(op_type: OperationType) -> Operation:
 
 
 _register(Addition())
+_register(Multiplication())
 
 
 def add(a: float, b: float) -> float:
     result = _get_operation(OperationType.ADD).execute(a, b)
+    return result.value
+
+
+def multiply(a: float, b: float) -> float:
+    result = _get_operation(OperationType.MULTIPLY).execute(a, b)
     return result.value

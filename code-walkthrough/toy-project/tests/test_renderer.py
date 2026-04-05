@@ -7,6 +7,7 @@ from calculator.renderer import (
     _get_renderer,
     _symbol_for,
     render_addition,
+    render_multiplication,
 )
 
 
@@ -37,9 +38,29 @@ class TestRenderContext:
         assert ctx.format_number(3.14) == "3.140"
 
 
+class TestRenderMultiplication:
+    def test_integers(self) -> None:
+        assert render_multiplication(2, 3) == "2 * 3 = 6"
+
+    def test_floats(self) -> None:
+        assert render_multiplication(1.5, 2.0) == "1.5 * 2 = 3"
+
+    def test_verbose(self) -> None:
+        result = render_multiplication(4, 5, fmt=OutputFormat.VERBOSE)
+        assert "Operation: multiply" in result
+        assert "Operands:  4, 5" in result
+        assert "Result:    20" in result
+
+    def test_precision(self) -> None:
+        assert render_multiplication(2, 3, precision=2) == "2.00 * 3.00 = 6.00"
+
+
 class TestSymbolLookup:
     def test_add_symbol(self) -> None:
         assert _symbol_for(OperationType.ADD) == "+"
+
+    def test_multiply_symbol(self) -> None:
+        assert _symbol_for(OperationType.MULTIPLY) == "*"
 
     def test_unknown_symbol(self) -> None:
         with pytest.raises(ValueError):
