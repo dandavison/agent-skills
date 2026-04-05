@@ -1,0 +1,23 @@
+{
+  "skill_name": "code-path-diagram",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Diagram how the workflow cache handles a GetOrCreateChasmExecution call, including the cache hit vs miss paths and what happens on miss (loading mutable state from persistence). Write the diagram to .task/eval-cache-lookup.d2",
+      "expected_output": "A d2 diagram showing the cache lookup flow with LRU hit/miss branching, lock acquisition, LoadMutableState guard, and persistence read on miss",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "Create a d2 diagram showing how transfer tasks get generated and persisted when a workflow completes a workflow task (i.e. RespondWorkflowTaskCompleted). Show the path from the API handler down through mutable state mutation and into the persistence layer. Write to .task/eval-task-persistence.d2",
+      "expected_output": "A d2 diagram showing the RespondWorkflowTaskCompleted flow through history engine, mutable state updates, transaction closing, and persistence write",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Trace the full execution path for a TerminateWorkflowExecution request, from the history handler entry point through consistency checking, mutable state mutation, and persistence. Include the cache lookup and show what happens if the workflow is already terminated. Write to .task/eval-terminate-wf.d2",
+      "expected_output": "A d2 diagram showing terminate workflow flow including consistency check, cache lookup, mutable state termination logic, already-terminated check, and persistence write",
+      "files": []
+    }
+  ]
+}

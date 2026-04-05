@@ -1,0 +1,500 @@
+direction: down
+
+# ---------- Legend (horizontal, at top) ----------
+
+legend: {
+  label: ""
+  direction: right
+
+  yellow: "In-memory (LRU cache)" {
+    style.fill: "#ffe066"
+    style.stroke: "#8a6d00"
+    style.stroke-width: 3
+  }
+  red: "Persistence (Cassandra)" {
+    style.fill: "#f5a0a0"
+    style.stroke: "#a01010"
+    style.stroke-width: 3
+  }
+  blue: "Cloud decorator\n(saas-temporal)" {
+    style.fill: "#b8d4f0"
+    style.stroke: "#1a5276"
+    style.stroke-width: 3
+  }
+  orange: "Tiered storage (S3)" {
+    style.fill: "#f5d6a0"
+    style.stroke: "#a06010"
+    style.stroke-width: 3
+  }
+}
+
+# ---------- Activity handler operations ----------
+
+handler: Activity Handler {
+  start: StartActivityExecution {
+    style.fill: "#b8e6b8"
+    style.stroke: "#1a6b1a"
+    style.stroke-width: 2
+  }
+  describe: DescribeActivityExecution {
+    style.fill: "#c8b8e8"
+    style.stroke: "#4a2d8a"
+    style.stroke-width: 2
+  }
+  poll: PollActivityExecution {
+    style.fill: "#c8b8e8"
+    style.stroke: "#4a2d8a"
+    style.stroke-width: 2
+  }
+  terminate: TerminateActivityExecution {
+    style.fill: "#c8b8e8"
+    style.stroke: "#4a2d8a"
+    style.stroke-width: 2
+  }
+  cancel: RequestCancelActivityExecution {
+    style.fill: "#c8b8e8"
+    style.stroke: "#4a2d8a"
+    style.stroke-width: 2
+  }
+  delete: DeleteActivityExecution {
+    style.fill: "#c8b8e8"
+    style.stroke: "#4a2d8a"
+    style.stroke-width: 2
+  }
+}
+
+# ---------- Two divergent paths ----------
+
+start_path: "Start path\n(no RunID known yet)" {
+  style.fill: "#b8e6b8"
+  style.stroke: "#1a6b1a"
+  style.stroke-width: 2
+}
+
+lease_path: "Read/Mutate path" {
+  style.fill: "#c8b8e8"
+  style.stroke: "#4a2d8a"
+  style.stroke-width: 2
+}
+
+handler.start -> start_path
+handler.describe -> lease_path
+handler.poll -> lease_path
+handler.terminate -> lease_path
+handler.cancel -> lease_path
+handler.delete -> lease_path
+
+# ================================================================
+# START PATH (empty RunID)
+# Identical to OSS: ChasmEngine is not overridden by saas-temporal
+# ================================================================
+
+lock_current: "lockCurrentExecution\nchasm_engine.go:733\n(OSS — not overridden)" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/chasm_engine.go#L733"
+}
+
+start_path -> lock_current
+
+get_or_create_current: "GetOrCreateCurrentExecution\ncache.go:172\nSets RunID = '' explicitly (line 196)\n(OSS — not overridden)" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/cache/cache.go#L172"
+}
+
+lock_current -> get_or_create_current
+
+cache_lookup_empty: "LRU cache.Get(key)\nlru.go:190" {
+  style.fill: "#ffe066"
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+  style.bold: true
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/common/cache/lru.go#L190"
+}
+
+cache_key_empty: "Cache Key (sentinel):\n{nsID, businessID, '', archetypeID, shardUUID}\nRunID is empty" {
+  style.fill: "#ffe066"
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+  style.italic: true
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/cache/cache.go#L73-L79"
+}
+
+get_or_create_current -> cache_lookup_empty: "memory lookup" {
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+}
+cache_lookup_empty -> cache_key_empty: uses {
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+}
+
+create_new_exec: "createNewExecution\nchasm_engine.go:156\nBuilds MutableState in memory\n(no persistence read)" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/chasm_engine.go#L156"
+}
+
+cache_lookup_empty -> create_new_exec: "lock acquired\n(hit or miss, just a lock)"
+
+persist_brand_new: "persistAsBrandNew\nchasm_engine.go:851\nOptimistic conditional write" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/chasm_engine.go#L851"
+}
+
+create_new_exec -> persist_brand_new
+
+# Descent into persistence (via Cloud decorator chain)
+
+ctx_create: "ContextImpl.CreateWorkflowExecution\ncontext.go:237" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/context.go#L237"
+}
+
+persist_brand_new -> ctx_create
+
+shard_create: "shardContext.CreateWorkflowExecution\ncontext_impl.go:569\nAcquires shard lock, assigns rangeID" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/shard/context_impl.go#L569"
+}
+
+ctx_create -> shard_create
+
+# Cloud decorator chain for writes
+# CreateWorkflowExecution is NOT overridden by cds executionManagerImpl,
+# so it passes through all decorators to OSS.
+
+cloud_decorator_chain_write: "Cloud ExecutionManager decorator chain\n(saas-temporal)\n\nCreateWorkflowExecution is NOT overridden\nby cds wrapper — passes straight through" {
+  style.fill: "#b8d4f0"
+  style.stroke: "#1a5276"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/saas-temporal/blob/main/cds/persistence/execution_manager.go"
+}
+
+shard_create -> cloud_decorator_chain_write {
+  style.stroke: "#1a5276"
+  style.stroke-width: 3
+}
+
+exec_mgr_create: "OSS executionManager.CreateWorkflowExecution\nexecution_manager.go:72\nSerializes snapshot + events" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/common/persistence/execution_manager.go#L72"
+}
+
+cloud_decorator_chain_write -> exec_mgr_create: "cds rate limiter\n-> cds metrics\n-> OSS retry\n-> OSS ExecutionManager" {
+  style.stroke: "#1a5276"
+  style.stroke-width: 2
+}
+
+# OSS Cassandra ExecutionStore
+
+cass_exec_store: "cassandra.ExecutionStore.CreateWorkflowExecution\ncassandra/execution_store.go:97\nAppends history nodes, then delegates\nto MutableStateStore" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/main/common/persistence/cassandra/execution_store.go#L97"
+}
+
+exec_mgr_create -> cass_exec_store {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+cass_ms_create: "MutableStateStore.CreateWorkflowExecution\ncassandra/mutable_state_store.go:383\nBuilds a logged batch (gocql.LoggedBatch)" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/main/common/persistence/cassandra/mutable_state_store.go#L383"
+}
+
+cass_exec_store -> cass_ms_create {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+cass_brand_new_insert: "CreateWorkflowModeBrandNew\nmutable_state_store.go:425-438\n\nINSERT into executions\n(current-execution marker row)\nIF NOT EXISTS\nKey: {shardID, nsID, workflowID}" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/main/common/persistence/cassandra/mutable_state_store.go#L425"
+}
+
+cass_ms_create -> cass_brand_new_insert {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+cass_snapshot: "applyWorkflowSnapshotBatchAsNew\ncassandra/util.go:264\nAdds to batch: execution row,\nactivities, timers, child execs,\nchasm nodes, tasks, etc." {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/main/common/persistence/cassandra/util.go#L264"
+}
+
+cass_brand_new_insert -> cass_snapshot {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+cass_cas: "MapExecuteBatchCAS\nmutable_state_store.go:466\nExecutes entire logged batch atomically\nwith Compare-And-Set" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  style.bold: true
+  link: "https://github.com/temporalio/temporal/blob/main/common/persistence/cassandra/mutable_state_store.go#L466"
+}
+
+cass_snapshot -> cass_cas {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+cass_cas_ok: "CAS succeeded\n(IF NOT EXISTS satisfied)" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+cass_cas -> cass_cas_ok: "applied = true" {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+conflict: "handleExecutionConflict\nchasm_engine.go:902\nChecks requestID idempotency,\nthen applies reuse/conflict policy" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/chasm_engine.go#L902"
+}
+
+cass_cas -> conflict: "applied = false\n(current-execution row exists)\n-> CurrentWorkflowConditionFailedError\n(carries existing RunID + RequestIDs)" {
+  style.stroke-dash: 5
+  style.stroke-width: 3
+}
+
+# ================================================================
+# READ/MUTATE PATH
+# ================================================================
+
+get_exec_lease: "getExecutionLease\nchasm_engine.go:1084\n(OSS — not overridden)" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/chasm_engine.go#L1084"
+}
+
+lease_path -> get_exec_lease
+
+consistency_check: "GetChasmLeaseWithConsistencyCheck\nconsistency_checker.go:164\n(OSS — not overridden)" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/api/consistency_checker.go#L164"
+}
+
+get_exec_lease -> consistency_check
+
+branch: "getWorkflowLeaseImpl\nconsistency_checker.go:175" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/api/consistency_checker.go#L175"
+}
+
+consistency_check -> branch
+
+# ----------------------------------------------------------------
+# Sub-path A: RunID present -> straight to getWorkflowLease
+# ----------------------------------------------------------------
+
+branch -> get_wf_lease: "len(RunID) != 0"
+
+# ----------------------------------------------------------------
+# Sub-path B: RunID absent -> resolve via getCurrentWorkflowLease
+# ----------------------------------------------------------------
+
+get_current_lease: "getCurrentWorkflowLease\nconsistency_checker.go:228" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/api/consistency_checker.go#L228"
+}
+
+branch -> get_current_lease: "RunID is empty" {
+  style.stroke-dash: 5
+}
+
+resolve_run_id: "GetCurrentChasmRunID\nconsistency_checker.go:236\n-> cache.GetCurrentRunID" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/api/consistency_checker.go#L236"
+}
+
+get_current_lease -> resolve_run_id
+
+lock_sentinel: "GetOrCreateCurrentExecution\ncache.go:451\nLocks empty-RunID sentinel slot" {
+  style.fill: "#ffe066"
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/cache/cache.go#L451"
+}
+
+resolve_run_id -> lock_sentinel: "memory (sentinel lock)" {
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+}
+
+get_current_exec: "shardContext.GetCurrentExecution\ncache.go:464\nReads current RunID from Cassandra" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/cache/cache.go#L464"
+}
+
+lock_sentinel -> get_current_exec: "persistence read" {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+get_current_exec -> get_wf_lease: "resolved RunID"
+
+# After getWorkflowLease, if execution is not running,
+# double-checks current RunID hasn't changed
+recheck: "Re-check: GetCurrentChasmRunID\nconsistency_checker.go:261\n(only if execution not running;\nguards against current-run races)" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/api/consistency_checker.go#L261"
+}
+
+get_current_lease -> recheck: "if not running" {
+  style.stroke-dash: 5
+}
+
+# ----------------------------------------------------------------
+# Shared: getWorkflowLease onwards (both sub-paths converge)
+# ----------------------------------------------------------------
+
+get_wf_lease: "getWorkflowLease\nconsistency_checker.go:275" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/api/consistency_checker.go#L275"
+}
+
+get_or_create_chasm: "GetOrCreateChasmExecution\ncache.go:216" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/cache/cache.go#L216"
+}
+
+get_wf_lease -> get_or_create_chasm
+
+cache_lookup_run: "LRU cache.Get(key)\nlru.go:190" {
+  style.fill: "#ffe066"
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+  style.bold: true
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/common/cache/lru.go#L190"
+}
+
+cache_key_run: "Cache Key (run-specific):\n{nsID, businessID, runID, archetypeID, shardUUID}\nRunID is a UUID" {
+  style.fill: "#ffe066"
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+  style.italic: true
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/cache/cache.go#L73-L79"
+}
+
+get_or_create_chasm -> cache_lookup_run: "memory lookup" {
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+}
+cache_lookup_run -> cache_key_run: uses {
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+}
+
+load_ms: "LoadMutableState\ncontext.go:137\nGuard: c.MutableState == nil" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/context.go#L137"
+}
+
+cache_lookup_run -> load_ms: "hit or miss ->\nlock WorkflowContext"
+
+ms_in_memory: "MutableState already loaded\n-> return from memory" {
+  style.fill: "#ffe066"
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+}
+
+load_ms -> ms_in_memory: "MutableState != nil\n(cache hit)" {
+  style.stroke: "#8a6d00"
+  style.stroke-width: 3
+}
+
+# ================================================================
+# Cache miss on Read/Mutate: this is where Cloud diverges from OSS
+# ================================================================
+
+get_wf_exec: "getWorkflowExecution\ntransaction_impl.go:466\n-> shardContext.GetWorkflowExecution" {
+  style.fill: "#ffffff"
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/service/history/workflow/transaction_impl.go#L466"
+}
+
+load_ms -> get_wf_exec: "MutableState == nil\n(cache miss)" {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+# Cloud decorator chain for reads
+
+cloud_decorator_chain_read: "Cloud ExecutionManager decorator chain\n(saas-temporal)\n\nGetWorkflowExecution IS overridden\nby cds wrapper" {
+  style.fill: "#b8d4f0"
+  style.stroke: "#1a5276"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/saas-temporal/blob/main/cds/persistence/execution_manager.go#L119"
+}
+
+get_wf_exec -> cloud_decorator_chain_read: "cds rate limiter\n-> cds metrics\n-> OSS retry" {
+  style.stroke: "#1a5276"
+  style.stroke-width: 3
+}
+
+oss_get_wf_exec: "OSS executionManager.GetWorkflowExecution\n-> cassandra.ExecutionStore reads\nexecution state from Cassandra" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/temporal/blob/f8bbf7c78/common/persistence/execution_manager.go"
+}
+
+cloud_decorator_chain_read -> oss_get_wf_exec: "delegates to\nembedded OSS manager" {
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+# Tiered storage check (Cloud-only)
+
+ts_check: "Check chasm nodes for\nwarm-tier metadata\nexecution_manager.go:130-148" {
+  style.fill: "#b8d4f0"
+  style.stroke: "#1a5276"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/saas-temporal/blob/main/cds/persistence/execution_manager.go#L130"
+}
+
+oss_get_wf_exec -> ts_check: "response" {
+  style.stroke: "#1a5276"
+  style.stroke-width: 3
+}
+
+no_warm_tier: "No warm-tier metadata\n-> return Cassandra response as-is" {
+  style.fill: "#f5a0a0"
+  style.stroke: "#a01010"
+  style.stroke-width: 3
+}
+
+ts_check -> no_warm_tier: "nodes empty or\nno warm-tier metadata" {
+  style.stroke: "#a01010"
+  style.stroke-width: 2
+}
+
+s3_rehydrate: "Rehydrate MutableState from S3\ntieredStorageFactory.GetStoreByMetadata\n-> store.Read(objectKey, msRanges)\n-> deserialize MutableStateBlob\n-> replace ChasmNodes in response" {
+  style.fill: "#f5d6a0"
+  style.stroke: "#a06010"
+  style.stroke-width: 3
+  link: "https://github.com/temporalio/saas-temporal/blob/main/cds/persistence/execution_manager.go#L136-L147"
+}
+
+ts_check -> s3_rehydrate: "warm-tier metadata found\n(data was uploaded to S3)" {
+  style.stroke: "#a06010"
+  style.stroke-width: 3
+}
+
+# Legend -> Handler ordering
+legend -> handler: {
+  style.opacity: 0
+}
