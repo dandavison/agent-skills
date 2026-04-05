@@ -8,6 +8,41 @@ description: |
   user wants a guided tour of how something works in the codebase.
 ---
 
+I'm considering making a more formal guarantee in the case of PRs/branches/commits that the
+walkthrough diff guarantees to "cover" the original diff, in the sense that if the reader reads
+through each walkthrough comment with its surrounding context, by the end they are _guaranteed_ to
+have read a superset of the actual diff. I think in this line of thinking it might make sense for
+the llm to choose the context shown with each walkthrough comment. I think the resulting diff should
+have the property that one never encounters "floating" diff content without first having read a
+walkthrough comment; in other words each diff hunk should start with a walkthrough comment, even if
+it (comment N) is just a brief intro to that area of code and is followed by a more substantial
+comment (N+1) some lines later.
+
+To state this differently and more formally: we are here restricting attention to the diff case, not
+the "codebase feature" case.  Define a diff to be [file1, [file2, ...]] where fileN is [hunk1,
+[hunk2, ...]]. The skill and python code must together essentially implement a function that takes
+in a diff and outputs a diff. The output diff has the following properties:
+
+1. A file may occur multiple times in the diff
+2. Looking at the entire diff, the WALKTHROUGH comments are consecutively numbered and occur in order.
+3. Each hunk is structured as a "walkthrough subsequence". A walkthrough subsequence contains a
+   subsequence of the walkthrough comment sequence. It is a valid diff hunk structured as
+   [walkthrough_subhunk1, [walkthrough_subhunk2, ...]]. A walkthrough subhunk always starts with
+   some added lines for walkthrough comment i, followed by some real diff lines (additions or
+   removals or both), followed optionally by some non-diff code context lines. The number of diff
+   lines (and optional code context lines) following each walkthrough comment should
+4. You should choose the number of lines of context _following_ each walkthrough comment on a
+   semantic basis (lines that are reasonably relevant to understanding this walkthrough comment).
+   You will need to strike a balance between on the one hand explaining related code in one
+   walkthrough subsequence, and on the other hand recognizing where to stop and treat the ensuing
+   code in a separate walkthrough subsequence.
+5. The union of all diff lines in all walkthrough subhunks is equal to the set of diff lines in the
+   original diff. This is non-negotiable and must be verified by the python code.
+
+In other words, you have partitioned the input diff into semantically coherent sections and then
+reordered them in narrative order, with the result remaining a valid diff.
+
+
 # Code Walkthrough
 
 Produce a walkthrough: numbered comments inserted into code, presented as a diff whose hunks
