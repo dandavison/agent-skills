@@ -497,14 +497,33 @@ def _infer_comment_syntax(file_path: str) -> str:
     return "//"
 
 
-def _format_comment(text: str, indent: str, comment_prefix: str) -> list[str]:
-    """Format walkthrough comment text into indented comment lines."""
+def _format_comment(
+    text: str, indent: str, comment_prefix: str, max_width: int = 100
+) -> list[str]:
+    """Format walkthrough comment text into indented, wrapped comment lines."""
+    prefix = f"{indent}{comment_prefix} "
+    available = max_width - len(prefix)
+    if available < 20:
+        available = 40
+
     result: list[str] = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if not line:
+    for paragraph in text.split("\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
             continue
-        result.append(f"{indent}{comment_prefix} {line}")
+        words = paragraph.split()
+        current_line: list[str] = []
+        current_len = 0
+        for word in words:
+            if current_line and current_len + 1 + len(word) > available:
+                result.append(f"{prefix}{' '.join(current_line)}")
+                current_line = [word]
+                current_len = len(word)
+            else:
+                current_len += (1 + len(word)) if current_line else len(word)
+                current_line.append(word)
+        if current_line:
+            result.append(f"{prefix}{' '.join(current_line)}")
     return result
 
 

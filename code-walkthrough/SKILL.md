@@ -95,6 +95,17 @@ reader will read them sequentially, so the sequence should tell a story: start w
 entry point or the most important concept, then follow the execution flow or the logical
 dependencies.
 
+**Group related changes into one step.** An addition and the removal it replaces belong
+together — the reader wants to see old and new side by side, not as separate steps. A
+function and the import it requires are one logical change. The goal is one step per
+*concept*, not one step per contiguous block of `+`/`-` lines.
+
+**Orient the reader in the call graph.** When explaining a function, connect it to what
+the reader has already seen or will see next. If the reader already saw the call site,
+remind them: "This is the validate() function called in step 2." If they haven't seen
+the caller yet, foreshadow it: "This helper will be called from the main handler in
+step 4." The reader should never wonder "when does this get called?"
+
 Choose context amounts semantically. A step introducing a new function in an unfamiliar
 file needs more context than a one-line change in a function the reader just saw.
 
