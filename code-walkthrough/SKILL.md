@@ -8,120 +8,114 @@ description: |
   user wants a guided tour of how something works in the codebase.
 ---
 
-I'm considering making a more formal guarantee in the case of PRs/branches/commits that the
-walkthrough diff guarantees to "cover" the original diff, in the sense that if the reader reads
-through each walkthrough comment with its surrounding context, by the end they are _guaranteed_ to
-have read a superset of the actual diff. I think in this line of thinking it might make sense for
-the llm to choose the context shown with each walkthrough comment. I think the resulting diff should
-have the property that one never encounters "floating" diff content without first having read a
-walkthrough comment; in other words each diff hunk should start with a walkthrough comment, even if
-it (comment N) is just a brief intro to that area of code and is followed by a more substantial
-comment (N+1) some lines later.
-
-To state this differently and more formally: we are here restricting attention to the diff case, not
-the "codebase feature" case.  Define a diff to be [file1, [file2, ...]] where fileN is [hunk1,
-[hunk2, ...]]. The skill and python code must together essentially implement a function that takes
-in a diff and outputs a diff. The output diff has the following properties:
-
-1. A file may occur multiple times in the diff
-2. Looking at the entire diff, the WALKTHROUGH comments are consecutively numbered and occur in order.
-3. Each hunk is structured as a "walkthrough subsequence". A walkthrough subsequence contains a
-   subsequence of the walkthrough comment sequence. It is a valid diff hunk structured as
-   [walkthrough_subhunk1, [walkthrough_subhunk2, ...]]. A walkthrough subhunk always starts with
-   some added lines for walkthrough comment i, followed by some real diff lines (additions or
-   removals or both), followed optionally by some non-diff code context lines. The number of diff
-   lines (and optional code context lines) following each walkthrough comment should
-4. You should choose the number of lines of context _following_ each walkthrough comment on a
-   semantic basis (lines that are reasonably relevant to understanding this walkthrough comment).
-   You will need to strike a balance between on the one hand explaining related code in one
-   walkthrough subsequence, and on the other hand recognizing where to stop and treat the ensuing
-   code in a separate walkthrough subsequence.
-5. The union of all diff lines in all walkthrough subhunks is equal to the set of diff lines in the
-   original diff. This is non-negotiable and must be verified by the python code.
-
-In other words, you have partitioned the input diff into semantically coherent sections and then
-reordered them in narrative order, with the result remaining a valid diff.
-
-
 # Code Walkthrough
 
-Produce a walkthrough: numbered comments inserted into code, presented as a diff whose hunks
-are reordered so they read sequentially as a narrative explanation.
+Produce a walkthrough of code changes or a codebase feature. The output is a diff that
+interleaves walkthrough comments with the actual code, reordered so that reading the diff
+from top to bottom tells a coherent story.
 
-The reorder-diff script is at: `~/.agents/skills/code-walkthrough/scripts/reorder-diff`
+The build-walkthrough script is at: `~/.agents/skills/code-walkthrough/scripts/build-walkthrough`
+
+## How it works
+
+The walkthrough is a transformation from an input diff to an output diff. You study the
+diff and codebase, then produce a **manifest** (JSON) that tells the script how to
+partition, reorder, and annotate the diff. The script constructs the output mechanically
+and validates a critical invariant: every `+`/`-` line from the original diff appears
+exactly once in the output.
+
+Your job is codebase comprehension and narrative decisions. The script handles all diff
+syntax, hunk headers, and line counts.
 
 ## Procedure
 
-### 1. Determine scope
+### 1. Obtain the input diff
 
-Figure out what the user wants walked through:
+Determine what the user wants walked through and obtain a diff:
 
-- **A branch or PR**: diff against the base branch (`git merge-base` to find the fork point,
-  then read the changed files).
-- **A feature or mechanism in the codebase**: read the relevant code paths.
-- **A specific diff the user provides**: use that directly.
-
-If ambiguous, ask the user to clarify. Prefer to ask one targeted question rather than
-guessing wrong.
-
-### 2. Study the code
-
-Read and understand the relevant code thoroughly before writing any comments. Trace the
-execution flow, understand the data transformations, identify the key design decisions.
-The quality of the walkthrough depends entirely on the depth of your understanding.
-
-### 3. Write walkthrough comments
-
-Add comments to the working tree that walk the reader through the code in a logical
-narrative order. Each comment starts with `[WALKTHROUGH i/N]` where i is the step number
-and N is the total count.
-
-**Walkthrough comments must be pure additions.** The final walkthrough diff is a
-presentation format: the reader sees the original code as context, with your `+` comment
-lines interleaved as annotations. If you modify or replace existing code, the diff will
-contain `-` lines, which breaks this format — the reader would see deletions that have
-nothing to do with the walkthrough narrative. So: only insert new comment lines, never
-touch existing code or comments.
-
-Use the language's idiomatic comment syntax. Place each comment on the line above the
-code it describes. Keep comments concise — one to three sentences. The sequence should
-tell a story: what happens first, what happens next, why something is done a certain way.
-
-Choose an order that makes sense as a narrative for the reader, not necessarily the order
-the code appears in source files. For example, you might start with the entry point, then
-follow the call chain, then explain a helper that was invoked earlier.
-
-### 4. Generate the raw diff
-
+**A branch, PR, or commit** — generate the diff directly:
 ```bash
-git diff -U77 > /tmp/walkthrough-raw.diff
+git diff -U77 $(git merge-base HEAD <base-branch>)..HEAD > /tmp/original.diff
 ```
 
-Default to 77 lines of context. The user may request a different value. Large context
-means multiple walkthrough comments will often share a hunk — that's fine. The
-reorder-diff script handles this by creating a separate copy of the hunk for each
-walkthrough step, stripping the other steps' markers from each copy.
+**An existing feature in the codebase** — create a synthetic diff. The working tree must
+be clean (error out if it isn't). Remove the feature from the codebase (it doesn't need
+to compile; this is for explanation purposes). Commit that removal. Revert the commit.
+Now the revert commit's diff is your input: it shows the feature being "added", which is
+exactly the narrative you want. Generate the diff of that revert and use it as input.
 
-### 5. Reorder and clean the diff
+If the scope is ambiguous, ask the user to clarify.
 
-Run the bundled script:
+### 2. Study the diff and codebase
 
-```bash
-~/.agents/skills/code-walkthrough/scripts/reorder-diff /tmp/walkthrough-raw.diff /tmp/walkthrough.diff
+Read the diff with line numbers (`cat -n /tmp/original.diff`). Read the changed files in
+full. Trace execution flow, understand data transformations, identify key design decisions.
+The walkthrough quality depends entirely on the depth of your understanding.
+
+### 3. Write the manifest
+
+Produce a JSON file that partitions the original diff into narrative-ordered, annotated
+steps. Every `+`/`-` line in the original diff must be assigned to exactly one step.
+
+```json
+{
+  "steps": [
+    {
+      "comment": "New validation function checks for required fields.",
+      "start_line": 19,
+      "end_line": 24,
+      "context_before": 0,
+      "context_after": 1
+    },
+    {
+      "comment": "The handler now validates before processing.",
+      "start_line": 7,
+      "end_line": 9,
+      "context_before": 1,
+      "context_after": 3
+    }
+  ]
+}
 ```
 
-This reorders hunks by walkthrough number and strips other walkthrough markers from each
-hunk's context, so the reader sees only the current step's comment in each hunk.
+**Fields:**
+- `comment`: Your walkthrough text. The script prepends `[WALKTHROUGH i/N]` and formats
+  it using the file's comment syntax. Write plain prose, not code comments.
+- `start_line` / `end_line`: Inclusive, 1-indexed line numbers in the original diff file.
+  Must start and end on `+`/`-` lines. Any context (` `) lines between them are included
+  automatically.
+- `context_before`: Number of context lines to show before the first diff line, for
+  orientation ("where am I in this file?"). Default: 3.
+- `context_after`: Number of context lines to show after the last diff line. Default: 3.
 
-### 6. Revert the walkthrough comments
+**Narrative design guidelines:**
+
+Steps are in narrative order — the array position determines the walkthrough number. The
+reader will read them sequentially, so the sequence should tell a story: start with the
+entry point or the most important concept, then follow the execution flow or the logical
+dependencies.
+
+Choose context amounts semantically. A step introducing a new function in an unfamiliar
+file needs more context than a one-line change in a function the reader just saw.
+
+Every `+`/`-` line must appear in exactly one step. Less interesting changes (imports,
+formatting, boilerplate) still get steps — just brief comments, placed later in the
+sequence. The script will reject a manifest that doesn't cover all diff lines.
+
+### 4. Build the walkthrough
 
 ```bash
-git checkout -- .
+~/.agents/skills/code-walkthrough/scripts/build-walkthrough \
+  /tmp/original.diff /tmp/manifest.json /tmp/walkthrough.diff
 ```
 
-The comments were scaffolding. The final artifact is the diff file, not the modified source.
+The script:
+- Constructs the output diff with walkthrough comments interleaved
+- Validates that every `+`/`-` line appears exactly once (the coverage invariant)
+- Validates hunk header line counts are correct
+- Exits with an error if anything is wrong — fix the manifest and rerun
 
-### 7. Present the result
+### 5. Present the result
 
-Tell the user where the walkthrough diff is (e.g. `/tmp/walkthrough.diff`) and briefly
-summarize what the walkthrough covers and how many steps it has.
+Tell the user the walkthrough diff location and summarize the narrative arc: how many
+steps, what the major sections cover, what the reader will learn.

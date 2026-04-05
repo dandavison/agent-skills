@@ -1,0 +1,574 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""
+Build a walkthrough diff from an original diff and a walkthrough manifest.
+
+Usage: build-walkthrough <original.diff> <manifest.json> <output.diff>
+
+The manifest is a JSON file specifying how to partition and reorder the
+original diff into a narrative walkthrough. See SKILL.md for the format.
+
+The script:
+1. Parses the original diff into structured form
+2. Validates that the manifest covers every +/- line exactly once
+3. Constructs a walkthrough diff with comments interleaved
+4. Validates the output is structurally correct
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from dataclasses import dataclass
+
+HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)")
+WALKTHROUGH_RE = re.compile(r"\[WALKTHROUGH\s+(\d+)/(\d+)\]")
+
+
+# ---------------------------------------------------------------------------
+# Diff parsing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DiffLine:
+    """A single line from a unified diff, with metadata."""
+
+    line_num: int  # 1-indexed position in the diff file
+    raw: str  # the full line text (with prefix)
+    kind: str  # 'add', 'del', 'ctx', 'hunk_header', 'file_header', 'other'
+    file_path: str  # which file this line belongs to
+    old_file_line: int | None = None  # line number in the old file
+    new_file_line: int | None = None  # line number in the new file
+
+
+def parse_diff(text: str) -> list[DiffLine]:
+    """Parse a unified diff into a list of DiffLine objects."""
+    lines = text.splitlines(keepends=True)
+    result: list[DiffLine] = []
+    current_file = ""
+    old_line = 0
+    new_line = 0
+    in_header = False
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        line_num = i + 1
+
+        if line.startswith("diff --git "):
+            # Extract file path from +++ line (look ahead)
+            current_file = ""
+            in_header = True
+            result.append(DiffLine(line_num, line, "file_header", current_file))
+            i += 1
+            continue
+
+        if in_header:
+            if line.startswith("+++ "):
+                # Extract path: +++ b/path or +++ /dev/null
+                path = line[4:].strip()
+                if path.startswith("b/"):
+                    path = path[2:]
+                current_file = path
+                # Update all file_header lines with the now-known path
+                for dl in result:
+                    if dl.kind == "file_header" and dl.file_path == "":
+                        dl.file_path = current_file
+                result.append(DiffLine(line_num, line, "file_header", current_file))
+                i += 1
+                continue
+            if (
+                line.startswith("--- ")
+                or line.startswith("index ")
+                or line.startswith(
+                    (
+                        "old mode",
+                        "new mode",
+                        "new file",
+                        "deleted file",
+                        "similarity",
+                        "rename",
+                        "copy",
+                    )
+                )
+            ):
+                result.append(DiffLine(line_num, line, "file_header", current_file))
+                i += 1
+                continue
+            in_header = False
+            # Fall through to hunk header check
+
+        m = HUNK_HEADER_RE.match(line)
+        if m:
+            in_header = False
+            old_line = int(m.group(1))
+            new_line = int(m.group(3))
+            result.append(
+                DiffLine(
+                    line_num,
+                    line,
+                    "hunk_header",
+                    current_file,
+                    old_file_line=old_line,
+                    new_file_line=new_line,
+                )
+            )
+            i += 1
+            continue
+
+        if line.startswith("+"):
+            result.append(
+                DiffLine(
+                    line_num,
+                    line,
+                    "add",
+                    current_file,
+                    new_file_line=new_line,
+                )
+            )
+            new_line += 1
+        elif line.startswith("-"):
+            result.append(
+                DiffLine(
+                    line_num,
+                    line,
+                    "del",
+                    current_file,
+                    old_file_line=old_line,
+                )
+            )
+            old_line += 1
+        elif line.startswith(" "):
+            result.append(
+                DiffLine(
+                    line_num,
+                    line,
+                    "ctx",
+                    current_file,
+                    old_file_line=old_line,
+                    new_file_line=new_line,
+                )
+            )
+            old_line += 1
+            new_line += 1
+        elif line.startswith("\\"):
+            result.append(DiffLine(line_num, line, "other", current_file))
+        else:
+            result.append(DiffLine(line_num, line, "other", current_file))
+
+        i += 1
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Manifest
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Step:
+    comment: str
+    start_line: int
+    end_line: int
+    context_before: int
+    context_after: int
+
+
+def load_manifest(path: str) -> list[Step]:
+    with open(path) as f:
+        data = json.load(f)
+
+    steps_data = data if isinstance(data, list) else data.get("steps", data)
+    steps: list[Step] = []
+    for s in steps_data:
+        steps.append(
+            Step(
+                comment=s["comment"],
+                start_line=s["start_line"],
+                end_line=s["end_line"],
+                context_before=s.get("context_before", 3),
+                context_after=s.get("context_after", 3),
+            )
+        )
+    return steps
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def validate_coverage(diff_lines: list[DiffLine], steps: list[Step]) -> None:
+    """Every +/- line must appear in exactly one step."""
+    change_line_nums = {dl.line_num for dl in diff_lines if dl.kind in ("add", "del")}
+    covered: set[int] = set()
+    for i, step in enumerate(steps):
+        step_range = set(range(step.start_line, step.end_line + 1))
+        step_changes = step_range & change_line_nums
+        overlap = step_changes & covered
+        if overlap:
+            die(
+                f"Step {i + 1}: lines {sorted(overlap)} already claimed by an earlier step"
+            )
+        covered |= step_changes
+
+    uncovered = change_line_nums - covered
+    if uncovered:
+        # Show a few uncovered lines for debugging
+        samples = sorted(uncovered)[:10]
+        by_line = {dl.line_num: dl for dl in diff_lines}
+        details = []
+        for ln in samples:
+            dl = by_line[ln]
+            details.append(f"  line {ln} ({dl.file_path}): {dl.raw.rstrip()}")
+        die(
+            f"{len(uncovered)} diff line(s) not covered by any step.\n"
+            f"First few:\n" + "\n".join(details)
+        )
+
+    # Validate start_line/end_line are actually +/- lines
+    by_num = {dl.line_num: dl for dl in diff_lines}
+    for i, step in enumerate(steps):
+        for endpoint, label in [
+            (step.start_line, "start_line"),
+            (step.end_line, "end_line"),
+        ]:
+            dl = by_num.get(endpoint)
+            if not dl or dl.kind not in ("add", "del"):
+                die(f"Step {i + 1}: {label}={endpoint} is not a +/- line")
+
+
+def validate_output(text: str) -> None:
+    """Validate hunk headers match actual line counts."""
+    lines = text.splitlines(keepends=True)
+    i = 0
+    errors: list[str] = []
+    while i < len(lines):
+        m = HUNK_HEADER_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        expected_old = int(m.group(2) or "1")
+        expected_new = int(m.group(4) or "1")
+        actual_old = 0
+        actual_new = 0
+        i += 1
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith("diff --git ") or HUNK_HEADER_RE.match(line):
+                break
+            if line.startswith(" "):
+                actual_old += 1
+                actual_new += 1
+            elif line.startswith("+"):
+                actual_new += 1
+            elif line.startswith("-"):
+                actual_old += 1
+            elif line.startswith("\\"):
+                pass
+            i += 1
+        if actual_old != expected_old or actual_new != expected_new:
+            errors.append(
+                f"Hunk @@ -{m.group(1)},{expected_old} +{m.group(3)},{expected_new} @@: "
+                f"actual old={actual_old} new={actual_new}"
+            )
+    if errors:
+        die("Invalid diff output:\n" + "\n".join(f"  {e}" for e in errors))
+
+
+# ---------------------------------------------------------------------------
+# Building the walkthrough diff
+# ---------------------------------------------------------------------------
+
+
+def build_walkthrough(diff_lines: list[DiffLine], steps: list[Step]) -> str:
+    """Construct the walkthrough diff from parsed diff lines and manifest steps."""
+    by_num = {dl.line_num: dl for dl in diff_lines}
+    total_steps = len(steps)
+    parts: list[str] = []
+    prev_file: str | None = None
+
+    for step_idx, step in enumerate(steps):
+        step_num = step_idx + 1
+
+        # Collect the diff lines for this step
+        step_diff_lines: list[DiffLine] = []
+        for ln in range(step.start_line, step.end_line + 1):
+            dl = by_num.get(ln)
+            if dl and dl.kind in ("add", "del", "ctx"):
+                step_diff_lines.append(dl)
+
+        if not step_diff_lines:
+            die(
+                f"Step {step_num}: no diff lines found in range {step.start_line}-{step.end_line}"
+            )
+
+        file_path = step_diff_lines[0].file_path
+
+        # Gather context_before lines
+        ctx_before: list[DiffLine] = []
+        if step.context_before > 0:
+            ln = step.start_line - 1
+            while ln > 0 and len(ctx_before) < step.context_before:
+                dl = by_num.get(ln)
+                if dl and dl.kind == "ctx" and dl.file_path == file_path:
+                    ctx_before.insert(0, dl)
+                elif dl and dl.kind in ("hunk_header", "file_header"):
+                    break
+                elif dl and dl.file_path != file_path:
+                    break
+                ln -= 1
+
+        # Gather context_after lines
+        ctx_after: list[DiffLine] = []
+        if step.context_after > 0:
+            ln = step.end_line + 1
+            max_ln = max(by_num.keys()) if by_num else 0
+            while ln <= max_ln and len(ctx_after) < step.context_after:
+                dl = by_num.get(ln)
+                if dl and dl.kind == "ctx" and dl.file_path == file_path:
+                    ctx_after.append(dl)
+                elif dl and dl.kind in ("hunk_header", "file_header"):
+                    break
+                elif dl and dl.kind in ("add", "del"):
+                    # Stop at next change line (belongs to another step)
+                    break
+                elif dl and dl.file_path != file_path:
+                    break
+                ln += 1
+
+        # Compute hunk line numbers
+        all_lines = ctx_before + step_diff_lines + ctx_after
+        old_start = _compute_old_start(all_lines)
+        new_start = _compute_new_start(all_lines)
+
+        # Build the walkthrough comment as + lines
+        comment_text = step.comment
+        # Inject [WALKTHROUGH i/N] if not already present
+        if not WALKTHROUGH_RE.search(comment_text):
+            comment_text = f"[WALKTHROUGH {step_num}/{total_steps}] {comment_text}"
+
+        # Determine indentation from first diff line content
+        indent = _infer_indent(step_diff_lines)
+        comment_syntax = _infer_comment_syntax(file_path)
+        comment_lines = _format_comment(comment_text, indent, comment_syntax)
+
+        # Count lines for hunk header
+        old_count = 0
+        new_count = 0
+        for dl in all_lines:
+            if dl.kind == "ctx":
+                old_count += 1
+                new_count += 1
+            elif dl.kind == "add":
+                new_count += 1
+            elif dl.kind == "del":
+                old_count += 1
+        new_count += len(comment_lines)  # walkthrough comment additions
+
+        # Emit file header if file changed
+        if file_path != prev_file:
+            parts.append(_file_header(file_path, diff_lines))
+            prev_file = file_path
+
+        # Emit hunk header
+        parts.append(f"@@ -{old_start},{old_count} +{new_start},{new_count} @@\n")
+
+        # Emit context_before
+        for dl in ctx_before:
+            parts.append(dl.raw if dl.raw.endswith("\n") else dl.raw + "\n")
+
+        # Emit walkthrough comment
+        for cl in comment_lines:
+            parts.append(f"+{cl}\n")
+
+        # Emit diff lines
+        for dl in step_diff_lines:
+            parts.append(dl.raw if dl.raw.endswith("\n") else dl.raw + "\n")
+
+        # Emit context_after
+        for dl in ctx_after:
+            parts.append(dl.raw if dl.raw.endswith("\n") else dl.raw + "\n")
+
+    return "".join(parts)
+
+
+def _compute_old_start(lines: list[DiffLine]) -> int:
+    for dl in lines:
+        if dl.old_file_line is not None:
+            return dl.old_file_line
+    return 1
+
+
+def _compute_new_start(lines: list[DiffLine]) -> int:
+    for dl in lines:
+        if dl.new_file_line is not None:
+            return dl.new_file_line
+    return 1
+
+
+def _infer_indent(lines: list[DiffLine]) -> str:
+    """Infer indentation from the first + or - line."""
+    for dl in lines:
+        if dl.kind in ("add", "del"):
+            content = dl.raw[1:]  # strip +/- prefix
+            stripped = content.lstrip()
+            if stripped:
+                return content[: len(content) - len(stripped)]
+    return ""
+
+
+COMMENT_SYNTAX: dict[str, tuple[str, str]] = {
+    # extension -> (line_comment, block_start)
+    # We only use line comments for walkthrough
+}
+
+LINE_COMMENT_BY_EXT: dict[str, str] = {
+    ".py": "#",
+    ".rb": "#",
+    ".sh": "#",
+    ".bash": "#",
+    ".zsh": "#",
+    ".yaml": "#",
+    ".yml": "#",
+    ".toml": "#",
+    ".r": "#",
+    ".pl": "#",
+    ".pm": "#",
+    ".rs": "//",
+    ".go": "//",
+    ".js": "//",
+    ".ts": "//",
+    ".tsx": "//",
+    ".jsx": "//",
+    ".java": "//",
+    ".c": "//",
+    ".cpp": "//",
+    ".cc": "//",
+    ".h": "//",
+    ".hpp": "//",
+    ".cs": "//",
+    ".swift": "//",
+    ".kt": "//",
+    ".kts": "//",
+    ".scala": "//",
+    ".dart": "//",
+    ".php": "//",
+    ".zig": "//",
+    ".v": "//",
+    ".proto": "//",
+    ".m": "//",
+    ".mm": "//",
+    ".hs": "--",
+    ".lua": "--",
+    ".sql": "--",
+    ".elm": "--",
+    ".erl": "%",
+    ".ex": "#",
+    ".exs": "#",
+    ".clj": ";;",
+    ".cljs": ";;",
+    ".lisp": ";;",
+    ".el": ";;",
+    ".vim": '"',
+    ".html": "<!--",
+    ".xml": "<!--",
+    ".svg": "<!--",
+    ".css": "/*",
+    ".scss": "//",
+    ".less": "//",
+    ".nix": "#",
+    ".tf": "#",
+}
+
+
+def _infer_comment_syntax(file_path: str) -> str:
+    """Return the line comment prefix for a file path."""
+    for ext, prefix in LINE_COMMENT_BY_EXT.items():
+        if file_path.endswith(ext):
+            return prefix
+    return "//"
+
+
+def _format_comment(text: str, indent: str, comment_prefix: str) -> list[str]:
+    """Format walkthrough comment text into indented comment lines."""
+    result: list[str] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        result.append(f"{indent}{comment_prefix} {line}")
+    return result
+
+
+def _file_header(file_path: str, diff_lines: list[DiffLine]) -> str:
+    """Reconstruct file header lines from the parsed diff."""
+    header_lines: list[str] = []
+    for dl in diff_lines:
+        if dl.file_path == file_path and dl.kind == "file_header":
+            raw = dl.raw if dl.raw.endswith("\n") else dl.raw + "\n"
+            header_lines.append(raw)
+    if header_lines:
+        return "".join(header_lines)
+    # Fallback: synthesize minimal header
+    return (
+        f"diff --git a/{file_path} b/{file_path}\n"
+        f"--- a/{file_path}\n"
+        f"+++ b/{file_path}\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def die(msg: str) -> None:
+    print(f"ERROR: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main() -> None:
+    if len(sys.argv) != 4:
+        print(
+            f"Usage: {sys.argv[0]} <original.diff> <manifest.json> <output.diff>",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    diff_path = sys.argv[1]
+    manifest_path = sys.argv[2]
+    output_path = sys.argv[3]
+
+    with open(diff_path) as f:
+        diff_text = f.read()
+
+    diff_lines = parse_diff(diff_text)
+    steps = load_manifest(manifest_path)
+
+    if not steps:
+        die("Manifest contains no steps")
+
+    validate_coverage(diff_lines, steps)
+
+    result = build_walkthrough(diff_lines, steps)
+    validate_output(result)
+
+    with open(output_path, "w") as f:
+        f.write(result)
+
+    print(
+        f"Wrote {len(steps)} walkthrough steps to {output_path}",
+        file=sys.stderr,
+    )
+
+
+if __name__ == "__main__":
+    main()

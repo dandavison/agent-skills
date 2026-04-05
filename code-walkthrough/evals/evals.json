@@ -1,0 +1,29 @@
+{
+  "skill_name": "code-walkthrough",
+  "evals": [
+    {
+      "id": 1,
+      "name": "large-feature-branch",
+      "prompt": "Create a walkthrough of the diff-colorizer branch",
+      "expected_output": "A walkthrough diff at /tmp/walkthrough.diff with numbered comments explaining the diff-colorizer feature across ~4 source files",
+      "files": [],
+      "working_directory": "/Users/dan/worktrees/edamagit/diff-colorizer/edamagit"
+    },
+    {
+      "id": 2,
+      "name": "small-bugfix-branch",
+      "prompt": "Walk me through the editor-close branch",
+      "expected_output": "A walkthrough diff explaining a small bug fix (staged diff view not closed after commit) across 1-2 files",
+      "files": [],
+      "working_directory": "/Users/dan/worktrees/edamagit/diff-colorizer/edamagit"
+    },
+    {
+      "id": 3,
+      "name": "existing-feature",
+      "prompt": "Walk me through how semantic token highlighting works in this codebase",
+      "expected_output": "A walkthrough diff explaining the semantic tokens provider, what token types exist, and how they map to highlighting",
+      "files": [],
+      "working_directory": "/Users/dan/worktrees/edamagit/diff-colorizer/edamagit"
+    }
+  ]
+}
