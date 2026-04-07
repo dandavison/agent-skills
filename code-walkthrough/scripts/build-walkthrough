@@ -378,8 +378,14 @@ def build_walkthrough(diff_lines: list[DiffLine], steps: list[Step]) -> str:
             parts.append(_file_header(file_path, diff_lines))
             prev_file = file_path
 
+        # Offset new_start so real code lines show correct file line numbers.
+        # Walkthrough comments get fictitious numbers; real lines are accurate.
+        adjusted_new_start = max(1, new_start - len(comment_lines))
+
         # Emit hunk header
-        parts.append(f"@@ -{old_start},{old_count} +{new_start},{new_count} @@\n")
+        parts.append(
+            f"@@ -{old_start},{old_count} +{adjusted_new_start},{new_count} @@\n"
+        )
 
         # Emit context_before
         for dl in ctx_before:
