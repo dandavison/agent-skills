@@ -1,0 +1,285 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pytest"]
+# ///
+
+"""Tests for build-walkthrough: diff parsing, manifest validation, and output construction."""
+
+from __future__ import annotations
+
+import importlib.machinery
+import importlib.util
+import json
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+_script = Path(__file__).parent.parent / "scripts" / "build-walkthrough"
+_loader = importlib.machinery.SourceFileLoader("build_walkthrough", str(_script))
+_spec = importlib.util.spec_from_loader("build_walkthrough", _loader)
+assert _spec
+bw = importlib.util.module_from_spec(_spec)
+sys.modules["build_walkthrough"] = bw
+_loader.exec_module(bw)
+
+parse_diff = bw.parse_diff
+load_manifest = bw.load_manifest
+validate_coverage = bw.validate_coverage
+validate_output = bw.validate_output
+build_walkthrough = bw.build_walkthrough
+Step = bw.Step
+_compute_old_start = bw._compute_old_start
+_format_comment = bw._format_comment
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+SIMPLE_DIFF = textwrap.dedent("""\
+    diff --git a/handler.go b/handler.go
+    index abc..def 100644
+    --- a/handler.go
+    +++ b/handler.go
+    @@ -10,8 +10,12 @@ func main() {
+     func handle(req Request) Response {
+    +    if err := validate(req); err != nil {
+    +        return errorResponse(err)
+    +    }
+         result := transform(req.Data)
+    -    return result
+    +    return okResponse(result)
+     }
+    diff --git a/validator.go b/validator.go
+    index 111..222 100644
+    --- a/validator.go
+    +++ b/validator.go
+    @@ -1,3 +1,8 @@
+    +func validate(req Request) error {
+    +    if req.Data == nil {
+    +        return ErrMissingData
+    +    }
+    +    return nil
+    +}
+     // end of file
+""")
+
+# A diff with a pure addition deep in a file (not at the beginning).
+# This tests that old_start is computed correctly for insertions that
+# happen in the middle/end of an existing file.
+PURE_ADDITION_DEEP_DIFF = textwrap.dedent("""\
+    diff --git a/big_test.go b/big_test.go
+    index aaa..bbb 100644
+    --- a/big_test.go
+    +++ b/big_test.go
+    @@ -100,3 +100,10 @@ func existingTest() {
+     // existing code line A
+     // existing code line B
+     // existing code line C
+    +func newTest() {
+    +    t := s.T()
+    +    ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+    +    defer cancel()
+    +    _, err := s.Client().DoSomething(ctx, &req{})
+    +    require.Error(t, err)
+    +}
+""")
+
+# A diff with two hunks in the same file: one pure addition early,
+# one pure addition late.
+TWO_HUNKS_SAME_FILE_DIFF = textwrap.dedent("""\
+    diff --git a/example.go b/example.go
+    index aaa..bbb 100644
+    --- a/example.go
+    +++ b/example.go
+    @@ -5,3 +5,5 @@ package main
+     import "fmt"
+     import "os"
+    +import "net/http"
+    +import "encoding/json"
+     import "strings"
+    @@ -50,3 +52,8 @@ func handler() {
+     // end of handler
+     // more code
+     // yet more code
+    +func newEndpoint() {
+    +    fmt.Println("hello")
+    +    os.Exit(0)
+    +}
+    +// end
+""")
+
+
+# ---------------------------------------------------------------------------
+# Tests: parse_diff
+# ---------------------------------------------------------------------------
+
+class TestParseDiff:
+    def test_basic_structure(self):
+        lines = parse_diff(SIMPLE_DIFF)
+        files = {dl.file_path for dl in lines if dl.kind == "file_header"}
+        assert "handler.go" in files
+        assert "validator.go" in files
+
+    def test_line_numbers(self):
+        lines = parse_diff(SIMPLE_DIFF)
+        adds = [dl for dl in lines if dl.kind == "add"]
+        assert len(adds) == 10  # handler: 3 (validate call) + 1 (okResponse) = 4; validator: 6
+        dels = [dl for dl in lines if dl.kind == "del"]
+        assert len(dels) == 1  # -return result
+
+    def test_old_file_line_tracking(self):
+        lines = parse_diff(SIMPLE_DIFF)
+        # The "- return result" line should have old_file_line set
+        del_lines = [dl for dl in lines if dl.kind == "del"]
+        assert len(del_lines) == 1
+        assert del_lines[0].old_file_line is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests: _compute_old_start (the bug)
+# ---------------------------------------------------------------------------
+
+class TestComputeOldStart:
+    def test_pure_addition_at_start(self):
+        """Pure addition at start of new file: old_start should be 1."""
+        lines = parse_diff(SIMPLE_DIFF)
+        # validator.go additions (lines 19-24 in the diff)
+        validator_adds = [dl for dl in lines
+                          if dl.file_path == "validator.go" and dl.kind == "add"]
+        # With no context, old_start falls back — but for line 1, that's ok
+        old_start = _compute_old_start(validator_adds)
+        assert old_start == 1
+
+    def test_pure_addition_deep_in_file(self):
+        """Pure addition deep in a file: old_start must NOT be 1.
+
+        This is the bug: when a step contains only + lines added at (say)
+        line 100 of an existing file, _compute_old_start was returning 1
+        instead of the actual insertion point. This caused delta to show
+        the wrong file header.
+        """
+        lines = parse_diff(PURE_ADDITION_DEEP_DIFF)
+        add_lines = [dl for dl in lines if dl.kind == "add"]
+        assert len(add_lines) == 7
+
+        # Build a step covering just the + lines (no context)
+        step = Step(
+            comment="Test step",
+            start_line=add_lines[0].line_num,
+            end_line=add_lines[-1].line_num,
+            context_before=0,
+            context_after=0,
+        )
+
+        # Build walkthrough with this step
+        result = build_walkthrough(lines, [step])
+
+        # The hunk header should reference old line ~103, NOT line 1
+        import re
+        m = re.search(r"@@ -(\d+),(\d+) \+", result)
+        assert m, f"No hunk header found in output:\n{result}"
+        old_start = int(m.group(1))
+        assert old_start >= 100, (
+            f"old_start={old_start} for a pure addition at line ~103; "
+            f"should be >= 100, not 1"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: build_walkthrough
+# ---------------------------------------------------------------------------
+
+class TestBuildWalkthrough:
+    def test_simple_walkthrough(self):
+        lines = parse_diff(SIMPLE_DIFF)
+        # Find actual + line numbers
+        handler_adds = [dl for dl in lines
+                        if dl.file_path == "handler.go" and dl.kind == "add"]
+        handler_del = [dl for dl in lines
+                       if dl.file_path == "handler.go" and dl.kind == "del"]
+        validator_adds = [dl for dl in lines
+                          if dl.file_path == "validator.go" and dl.kind == "add"]
+
+        steps = [
+            Step("Validate function", validator_adds[0].line_num,
+                 validator_adds[-1].line_num, 0, 1),
+            Step("Call validate", handler_adds[0].line_num,
+                 handler_adds[2].line_num, 1, 0),
+            Step("Wrap return", handler_del[0].line_num,
+                 handler_adds[3].line_num, 1, 1),
+        ]
+        result = build_walkthrough(lines, steps)
+        assert "WALKTHROUGH 1/3" in result
+        assert "WALKTHROUGH 2/3" in result
+        assert "WALKTHROUGH 3/3" in result
+
+    def test_coverage_all_lines(self):
+        """All +/- lines must be covered."""
+        lines = parse_diff(SIMPLE_DIFF)
+        adds = [dl for dl in lines if dl.kind in ("add", "del")]
+
+        # Only cover some lines — should fail
+        step = Step("Partial", adds[0].line_num, adds[0].line_num, 0, 0)
+        with pytest.raises(SystemExit):
+            validate_coverage(lines, [step])
+
+    def test_two_hunks_same_file(self):
+        """Two steps in the same file should produce two hunks under one file header."""
+        lines = parse_diff(TWO_HUNKS_SAME_FILE_DIFF)
+        adds_early = [dl for dl in lines
+                      if dl.kind == "add" and dl.new_file_line is not None
+                      and dl.new_file_line < 20]
+        adds_late = [dl for dl in lines
+                     if dl.kind == "add" and dl.new_file_line is not None
+                     and dl.new_file_line >= 50]
+
+        steps = [
+            Step("New imports", adds_early[0].line_num,
+                 adds_early[-1].line_num, 1, 1),
+            Step("New endpoint", adds_late[0].line_num,
+                 adds_late[-1].line_num, 1, 0),
+        ]
+        result = build_walkthrough(lines, steps)
+        # File header should appear only once
+        assert result.count("diff --git a/example.go") == 1
+        # But two hunk headers
+        import re
+        assert len(re.findall(r"^@@", result, re.MULTILINE)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests: _format_comment (wrapping)
+# ---------------------------------------------------------------------------
+
+class TestFormatComment:
+    def test_short_comment_no_wrap(self):
+        lines = _format_comment("Short comment.", "    ", "//")
+        assert len(lines) == 1
+        assert lines[0] == "    // Short comment."
+
+    def test_long_comment_wraps(self):
+        long = "This is a really long comment " * 5
+        lines = _format_comment(long.strip(), "    ", "//", max_width=80)
+        assert len(lines) > 1
+        for line in lines:
+            assert len(line) <= 80
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # pytest requires .py extension for collection; create a temporary symlink
+    link = Path(__file__).with_suffix(".py")
+    link.unlink(missing_ok=True)
+    link.symlink_to(Path(__file__).resolve())
+    try:
+        sys.exit(pytest.main([str(link), "-v"]))
+    finally:
+        link.unlink(missing_ok=True)
