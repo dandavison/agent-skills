@@ -148,11 +148,10 @@ class TestComputeOldStart:
     def test_pure_addition_at_start(self):
         """Pure addition at start of new file: old_start should be 1."""
         lines = parse_diff(SIMPLE_DIFF)
-        # validator.go additions (lines 19-24 in the diff)
+        by_num = {dl.line_num: dl for dl in lines}
         validator_adds = [dl for dl in lines
                           if dl.file_path == "validator.go" and dl.kind == "add"]
-        # With no context, old_start falls back — but for line 1, that's ok
-        old_start = _compute_old_start(validator_adds)
+        old_start = _compute_old_start(validator_adds, by_num, validator_adds[0].line_num)
         assert old_start == 1
 
     def test_pure_addition_deep_in_file(self):

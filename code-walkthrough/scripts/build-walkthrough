@@ -346,8 +346,8 @@ def build_walkthrough(diff_lines: list[DiffLine], steps: list[Step]) -> str:
 
         # Compute hunk line numbers
         all_lines = ctx_before + step_diff_lines + ctx_after
-        old_start = _compute_old_start(all_lines)
-        new_start = _compute_new_start(all_lines)
+        old_start = _compute_old_start(all_lines, by_num, step.start_line)
+        new_start = _compute_new_start(all_lines, by_num, step.start_line)
 
         # Build the walkthrough comment as + lines
         comment_text = step.comment
@@ -406,17 +406,39 @@ def build_walkthrough(diff_lines: list[DiffLine], steps: list[Step]) -> str:
     return "".join(parts)
 
 
-def _compute_old_start(lines: list[DiffLine]) -> int:
+def _compute_old_start(
+    lines: list[DiffLine],
+    by_num: dict[int, DiffLine],
+    step_start: int,
+) -> int:
     for dl in lines:
         if dl.old_file_line is not None:
             return dl.old_file_line
+    # Pure addition: no old-side lines in the step. Scan backward in the
+    # original diff for the nearest line with an old_file_line.
+    for ln in range(step_start - 1, 0, -1):
+        dl = by_num.get(ln)
+        if dl and dl.old_file_line is not None:
+            # The insertion happens after this old-file line
+            offset = 1 if dl.kind in ("ctx", "del") else 0
+            return dl.old_file_line + offset
     return 1
 
 
-def _compute_new_start(lines: list[DiffLine]) -> int:
+def _compute_new_start(
+    lines: list[DiffLine],
+    by_num: dict[int, DiffLine],
+    step_start: int,
+) -> int:
     for dl in lines:
         if dl.new_file_line is not None:
             return dl.new_file_line
+    # Pure deletion: scan backward for nearest new-file line
+    for ln in range(step_start - 1, 0, -1):
+        dl = by_num.get(ln)
+        if dl and dl.new_file_line is not None:
+            offset = 1 if dl.kind in ("ctx", "add") else 0
+            return dl.new_file_line + offset
     return 1
 
 
