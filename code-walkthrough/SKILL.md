@@ -3,9 +3,9 @@ name: code-walkthrough
 description: |
   Explain how code, a feature, PR, diff, or branch works by adding numbered walkthrough
   comments and producing a reordered diff that reads as a coherent narrative. Use this skill
-  whenever the user asks you to "walk through", "explain with comments", "annotate", or
-  "create a walkthrough" for code, a PR, a diff, a branch, or a feature. Also use when the
-  user wants a guided tour of how something works in the codebase.
+  whenever the user mentions "walkthrough" in the context of code, a PR, a diff, a branch,
+  or a feature — including "walk through", "code walkthrough", "create a walkthrough",
+  "explain with comments", "annotate", or "guided tour".
 ---
 
 # Code Walkthrough
@@ -59,6 +59,7 @@ steps. Every `+`/`-` line in the original diff must be assigned to exactly one s
 
 ```json
 {
+  "summary": "Adds request validation to the handler and wraps the return value.",
   "steps": [
     {
       "comment": "New validation function checks for required fields.",
@@ -68,7 +69,7 @@ steps. Every `+`/`-` line in the original diff must be assigned to exactly one s
       "context_after": 1
     },
     {
-      "comment": "The handler now validates before processing.",
+      "comment": "The handler now calls validate() (step 1) before processing.",
       "start_line": 7,
       "end_line": 9,
       "context_before": 1,
@@ -79,8 +80,11 @@ steps. Every `+`/`-` line in the original diff must be assigned to exactly one s
 ```
 
 **Fields:**
-- `comment`: Your walkthrough text. The script prepends `[WALKTHROUGH i/N]` and formats
-  it using the file's comment syntax. Write plain prose, not code comments.
+- `summary`: A brief description of what the overall diff achieves. Emitted as
+  `[WALKTHROUGH 0/N]` at the top of the output.
+- `comment`: Your walkthrough text for one step. The script puts `[WALKTHROUGH i/N]`
+  on its own line, then your text on subsequent lines, formatted with the file's comment
+  syntax and a `▶` prefix. Write plain prose, not code comments.
 - `start_line` / `end_line`: Inclusive, 1-indexed line numbers in the original diff file.
   Must start and end on `+`/`-` lines. Any context (` `) lines between them are included
   automatically.

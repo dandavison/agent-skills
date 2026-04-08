@@ -181,11 +181,23 @@ class Step:
     context_after: int
 
 
-def load_manifest(path: str) -> list[Step]:
+@dataclass
+class Manifest:
+    summary: str
+    steps: list[Step]
+
+
+def load_manifest(path: str) -> Manifest:
     with open(path) as f:
         data = json.load(f)
 
-    steps_data = data if isinstance(data, list) else data.get("steps", data)
+    summary = ""
+    if isinstance(data, dict):
+        summary = data.get("summary", "")
+        steps_data = data.get("steps", [])
+    else:
+        steps_data = data
+
     steps: list[Step] = []
     for s in steps_data:
         steps.append(
@@ -197,7 +209,7 @@ def load_manifest(path: str) -> list[Step]:
                 context_after=s.get("context_after", 3),
             )
         )
-    return steps
+    return Manifest(summary=summary, steps=steps)
 
 
 # ---------------------------------------------------------------------------
@@ -288,12 +300,29 @@ def validate_output(text: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def build_walkthrough(diff_lines: list[DiffLine], steps: list[Step]) -> str:
+def build_walkthrough(
+    diff_lines: list[DiffLine], steps: list[Step], summary: str = ""
+) -> str:
     """Construct the walkthrough diff from parsed diff lines and manifest steps."""
     by_num = {dl.line_num: dl for dl in diff_lines}
     total_steps = len(steps)
     parts: list[str] = []
     prev_file: str | None = None
+
+    # Emit summary as WALKTHROUGH 0 at the top of the first file
+    if summary:
+        first_file = _first_file_path(diff_lines)
+        if first_file:
+            comment_syntax = _infer_comment_syntax(first_file)
+            summary_lines = _format_comment(
+                f"[WALKTHROUGH 0/{total_steps}]", "", comment_syntax
+            )
+            summary_lines += _format_comment(summary, "", comment_syntax)
+            parts.append(_file_header(first_file, diff_lines))
+            prev_file = first_file
+            parts.append(f"@@ -1,0 +1,{len(summary_lines)} @@\n")
+            for cl in summary_lines:
+                parts.append(f"+{cl}\n")
 
     for step_idx, step in enumerate(steps):
         step_num = step_idx + 1
@@ -350,15 +379,13 @@ def build_walkthrough(diff_lines: list[DiffLine], steps: list[Step]) -> str:
         new_start = _compute_new_start(all_lines, by_num, step.start_line)
 
         # Build the walkthrough comment as + lines
-        comment_text = step.comment
-        # Inject [WALKTHROUGH i/N] if not already present
-        if not WALKTHROUGH_RE.search(comment_text):
-            comment_text = f"[WALKTHROUGH {step_num}/{total_steps}] {comment_text}"
-
-        # Determine indentation from first diff line content
         indent = _infer_indent(step_diff_lines)
         comment_syntax = _infer_comment_syntax(file_path)
-        comment_lines = _format_comment(comment_text, indent, comment_syntax)
+        # Label on its own line, then comment text on subsequent lines
+        comment_lines = _format_comment(
+            f"[WALKTHROUGH {step_num}/{total_steps}]", indent, comment_syntax
+        )
+        comment_lines += _format_comment(step.comment, indent, comment_syntax)
 
         # Count lines for hunk header
         old_count = 0
@@ -529,7 +556,7 @@ def _format_comment(
     text: str, indent: str, comment_prefix: str, max_width: int = 100
 ) -> list[str]:
     """Format walkthrough comment text into indented, wrapped comment lines."""
-    prefix = f"{indent}{comment_prefix} "
+    prefix = f"{indent}{comment_prefix} \u25b6 "
     available = max_width - len(prefix)
     if available < 20:
         available = 40
@@ -553,6 +580,14 @@ def _format_comment(
         if current_line:
             result.append(f"{prefix}{' '.join(current_line)}")
     return result
+
+
+def _first_file_path(diff_lines: list[DiffLine]) -> str | None:
+    """Return the file path of the first file in the diff."""
+    for dl in diff_lines:
+        if dl.kind == "file_header" and dl.file_path:
+            return dl.file_path
+    return None
 
 
 def _file_header(file_path: str, diff_lines: list[DiffLine]) -> str:
@@ -598,21 +633,21 @@ def main() -> None:
         diff_text = f.read()
 
     diff_lines = parse_diff(diff_text)
-    steps = load_manifest(manifest_path)
+    manifest = load_manifest(manifest_path)
 
-    if not steps:
+    if not manifest.steps:
         die("Manifest contains no steps")
 
-    validate_coverage(diff_lines, steps)
+    validate_coverage(diff_lines, manifest.steps)
 
-    result = build_walkthrough(diff_lines, steps)
+    result = build_walkthrough(diff_lines, manifest.steps, manifest.summary)
     validate_output(result)
 
     with open(output_path, "w") as f:
         f.write(result)
 
     print(
-        f"Wrote {len(steps)} walkthrough steps to {output_path}",
+        f"Wrote {len(manifest.steps)} walkthrough steps to {output_path}",
         file=sys.stderr,
     )
 
