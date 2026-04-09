@@ -38,10 +38,10 @@ Determine what the user wants walked through and obtain a diff:
 git diff -U77 $(git merge-base HEAD <base-branch>)..HEAD > /tmp/original.diff
 ```
 
-If they asked for a walkthrough for a branch or PR, be very careful about identifying precisely the
-right base commit against which the diff should be made. For example, check that their local branch
-is up to date with the remote, check what branch the PR is targeting, etc. If you have any
-uncertainty, stop and ask the user.
+Make absolutely sure at this stage that you are working with the diff that the user intends. For
+example, are you really sure what the base branch should be? Is it from main, or master, or is it
+part of a stacked PR? If it's a GitHub PR, what branch is the PR targeting? Check that their local
+branch is up to date with the remote. Etc. If you have any uncertainty, stop and ask the user.
 
 
 **An existing feature in the codebase** — create a synthetic diff. The working tree must
@@ -122,7 +122,7 @@ file needs more context than a one-line change in a function the reader just saw
 **Flag questionable code.** Your primary job is narrative explanation, not code review.
 But if you encounter something that looks wrong, risky, or suspicious — a potential bug,
 a race condition, a missing error check, a security concern — don't silently pass over
-it. Prefix that step's comment with ⚠️ and briefly say what concerns you.
+it. Prefix that step's comment with ❗ and briefly say what concerns you.
 
 Every `+`/`-` line must appear in exactly one step. Less interesting changes (imports,
 formatting, boilerplate) still get steps — just brief comments, placed later in the
