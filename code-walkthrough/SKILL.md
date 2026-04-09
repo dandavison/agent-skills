@@ -121,8 +121,21 @@ sequence. The script will reject a manifest that doesn't cover all diff lines.
 
 ```bash
 ~/.agents/skills/code-walkthrough/scripts/build-walkthrough \
-  /tmp/original.diff /tmp/manifest.json /tmp/walkthrough.diff
+  /tmp/original.diff /tmp/manifest.json .task/walkthrough.diff
 ```
+
+If the user requested extra context lines (e.g. "with 77 context lines", "lots of
+context"), pass `--context N` to override every step's `context_before`/`context_after`:
+
+```bash
+~/.agents/skills/code-walkthrough/scripts/build-walkthrough \
+  --context 77 \
+  /tmp/original.diff /tmp/manifest.json .task/walkthrough.diff
+```
+
+This is useful when the output will be viewed with a pager like delta that supports its
+own `-U` flag for controlling displayed context, and `n`/`N` navigation between
+walkthrough comments.
 
 The script:
 - Constructs the output diff with walkthrough comments interleaved

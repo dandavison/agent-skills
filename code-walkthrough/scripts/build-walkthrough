@@ -21,6 +21,7 @@ The script:
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -301,7 +302,10 @@ def validate_output(text: str) -> None:
 
 
 def build_walkthrough(
-    diff_lines: list[DiffLine], steps: list[Step], summary: str = ""
+    diff_lines: list[DiffLine],
+    steps: list[Step],
+    summary: str = "",
+    context_override: int | None = None,
 ) -> str:
     """Construct the walkthrough diff from parsed diff lines and manifest steps."""
     by_num = {dl.line_num: dl for dl in diff_lines}
@@ -327,6 +331,13 @@ def build_walkthrough(
     for step_idx, step in enumerate(steps):
         step_num = step_idx + 1
 
+        ctx_before_limit = (
+            context_override if context_override is not None else step.context_before
+        )
+        ctx_after_limit = (
+            context_override if context_override is not None else step.context_after
+        )
+
         # Collect the diff lines for this step
         step_diff_lines: list[DiffLine] = []
         for ln in range(step.start_line, step.end_line + 1):
@@ -343,9 +354,9 @@ def build_walkthrough(
 
         # Gather context_before lines
         ctx_before: list[DiffLine] = []
-        if step.context_before > 0:
+        if ctx_before_limit > 0:
             ln = step.start_line - 1
-            while ln > 0 and len(ctx_before) < step.context_before:
+            while ln > 0 and len(ctx_before) < ctx_before_limit:
                 dl = by_num.get(ln)
                 if dl and dl.kind == "ctx" and dl.file_path == file_path:
                     ctx_before.insert(0, dl)
@@ -357,10 +368,10 @@ def build_walkthrough(
 
         # Gather context_after lines
         ctx_after: list[DiffLine] = []
-        if step.context_after > 0:
+        if ctx_after_limit > 0:
             ln = step.end_line + 1
             max_ln = max(by_num.keys()) if by_num else 0
-            while ln <= max_ln and len(ctx_after) < step.context_after:
+            while ln <= max_ln and len(ctx_after) < ctx_after_limit:
                 dl = by_num.get(ln)
                 if dl and dl.kind == "ctx" and dl.file_path == file_path:
                     ctx_after.append(dl)
@@ -618,36 +629,39 @@ def die(msg: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        print(
-            f"Usage: {sys.argv[0]} <original.diff> <manifest.json> <output.diff>",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Build a walkthrough diff")
+    parser.add_argument("diff", help="Path to the original diff")
+    parser.add_argument("manifest", help="Path to the manifest JSON")
+    parser.add_argument("output", help="Path to write the walkthrough diff")
+    parser.add_argument(
+        "--context",
+        type=int,
+        default=None,
+        help="Override context lines before/after each step",
+    )
+    args = parser.parse_args()
 
-    diff_path = sys.argv[1]
-    manifest_path = sys.argv[2]
-    output_path = sys.argv[3]
-
-    with open(diff_path) as f:
+    with open(args.diff) as f:
         diff_text = f.read()
 
     diff_lines = parse_diff(diff_text)
-    manifest = load_manifest(manifest_path)
+    manifest = load_manifest(args.manifest)
 
     if not manifest.steps:
         die("Manifest contains no steps")
 
     validate_coverage(diff_lines, manifest.steps)
 
-    result = build_walkthrough(diff_lines, manifest.steps, manifest.summary)
+    result = build_walkthrough(
+        diff_lines, manifest.steps, manifest.summary, args.context
+    )
     validate_output(result)
 
-    with open(output_path, "w") as f:
+    with open(args.output, "w") as f:
         f.write(result)
 
     print(
-        f"Wrote {len(manifest.steps)} walkthrough steps to {output_path}",
+        f"Wrote {len(manifest.steps)} walkthrough steps to {args.output}",
         file=sys.stderr,
     )
 
