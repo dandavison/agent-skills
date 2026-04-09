@@ -38,6 +38,12 @@ Determine what the user wants walked through and obtain a diff:
 git diff -U77 $(git merge-base HEAD <base-branch>)..HEAD > /tmp/original.diff
 ```
 
+If they asked for a walkthrough for a branch or PR, be very careful about identifying precisely the
+right base commit against which the diff should be made. For example, check that their local branch
+is up to date with the remote, check what branch the PR is targeting, etc. If you have any
+uncertainty, stop and ask the user.
+
+
 **An existing feature in the codebase** — create a synthetic diff. The working tree must
 be clean (error out if it isn't). Remove the feature from the codebase (it doesn't need
 to compile; this is for explanation purposes). Commit that removal. Revert the commit.
