@@ -113,6 +113,11 @@ step 4." The reader should never wonder "when does this get called?"
 Choose context amounts semantically. A step introducing a new function in an unfamiliar
 file needs more context than a one-line change in a function the reader just saw.
 
+**Flag questionable code.** Your primary job is narrative explanation, not code review.
+But if you encounter something that looks wrong, risky, or suspicious — a potential bug,
+a race condition, a missing error check, a security concern — don't silently pass over
+it. Prefix that step's comment with ⚠️ and briefly say what concerns you.
+
 Every `+`/`-` line must appear in exactly one step. Less interesting changes (imports,
 formatting, boilerplate) still get steps — just brief comments, placed later in the
 sequence. The script will reject a manifest that doesn't cover all diff lines.
