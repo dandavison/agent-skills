@@ -86,7 +86,8 @@ steps. Every `+`/`-` line in the original diff must be assigned to exactly one s
 ```
 
 **Fields:**
-- `summary`: A brief description of what the overall diff achieves. Emitted as
+- `summary`: A brief, reader-friendly description of what the overall diff achieves.
+  Prefer a gentle, high-level framing over terse changelog language. Emitted as
   `[WALKTHROUGH 0/N]` at the top of the output.
 - `comment`: Your walkthrough text for one step. The script puts `[WALKTHROUGH i/N]`
   on its own line, then your text on subsequent lines, formatted with the file's comment
@@ -99,6 +100,13 @@ steps. Every `+`/`-` line in the original diff must be assigned to exactly one s
 - `context_after`: Number of context lines to show after the last diff line. Default: 3.
 
 **Narrative design guidelines:**
+
+**Start with a gentle overview.** The walkthrough should feel welcoming to a reader who
+does not yet know why the change exists. Use the summary and early steps to establish:
+what problem this branch is solving, why the old behavior was insufficient, and the broad
+shape of the solution. Prefer explanatory framing like "This branch teaches history how
+to..." or "The core challenge is..." over abrupt formulations like "Adds X" unless the
+change is truly tiny.
 
 Steps are in narrative order — the array position determines the walkthrough number. The
 reader will read them sequentially, so the sequence should tell a story: start with the
@@ -156,5 +164,14 @@ The script:
 
 ### 5. Present the result
 
-Tell the user the walkthrough diff location and summarize the narrative arc: how many
-steps, what the major sections cover, what the reader will learn.
+Tell the user the walkthrough diff location and introduce it with a gentle, reasonably
+comprehensive overview before summarizing the mechanics.
+
+Your presentation should usually include:
+- A short introductory paragraph that explains the user-visible goal of the branch and
+  the main challenge it had to solve.
+- A concise narrative-arc summary: how many steps there are, what the major sections
+  cover, and what the reader will learn by following them.
+
+Avoid dropping straight into file lists or step counts with no framing. The reader should
+understand the "why" before they start reading the diff.
