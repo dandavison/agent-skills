@@ -1,0 +1,256 @@
+---
+sidebar_position: 14
+slug: /media
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import AnimationPlayer from '@site/src/components/AnimationPlayer';
+import {VideoSettings} from '@site/src/Icon/VideoSettings';
+
+# Media
+
+In this chapter we will take a look at all the different types of media Motion
+Canvas lets you add to your animations.
+
+## Audio
+
+One type of media Canvas Commons supports is audio. To add an audio track to
+your animation you need to edit your `project.ts` file. First we need to import
+the audio file we want to use as follows:
+
+```ts
+// my-animation/
+// ├─ audio/
+// │  └─ voice.mp3
+// ├─ src/
+// ...
+import audio from '../audio/voice.mp3';
+```
+
+Once imported we need to let Canvas Commons know that we want to use this audio
+file. We can do this by specifying the `audio` property in the project
+configuration:
+
+```ts
+export default makeProject({
+  // ...
+  audio: audio,
+});
+```
+
+If we open the editor now, we should see that your audio track has been added.
+
+![](@site/static/img/media/editor-audio-track.png)
+
+However, it's not always ideal to start with the audio at the beginning.
+Sometimes it's better to start with a bit of delay. After configuring the audio,
+you can edit the offset in the Video Settings <VideoSettings
+  className="icon-inline"
+  alt="Video Settings"
+  title="Video Settings"
+/> tab. You can also hold <kbd>SHIFT</kbd> and drag the audio track left and
+right directly on the timeline.
+
+![](@site/static/img/media/editor-audio-track-delayed.png)
+
+### Supported Formats
+
+A list of supported file formats can be found
+[here](https://developer.mozilla.org/en-US/docs/Web/Media/Formats/Audio_codecs#common_codecs)
+
+## Images
+
+Another type of media Canvas Commons supports are images. To use an image in the
+animation, we need to import the image:
+
+```ts
+// my-animation/
+// ├─ images/
+// │  └─ example.png
+// ├─ src/
+// ...
+import examplePng from '../../images/example.png';
+```
+
+Then we can use Canvas Commons [`Img`](/api/2d/components/Img) component to
+display the image:
+
+<Tabs groupId="language" queryString>
+<TabItem value="tsx" label="TSX">
+
+```tsx
+import {makeScene2D, Img} from '@canvas-commons/2d';
+
+import examplePng from '../../images/example.png';
+
+export default makeScene2D(function* (view) {
+  view.add(<Img src={examplePng} />);
+});
+```
+
+</TabItem>
+<TabItem value="ts" label="TS">
+
+```ts
+import {makeScene2D, Img} from '@canvas-commons/2d';
+
+import examplePng from '../../images/example.png';
+
+export default makeScene2D(function* (view) {
+  view.add(new Img({src: examplePng}));
+});
+```
+
+</TabItem>
+</Tabs>
+
+Images can also be animated like every other component in Canvas Commons. For
+this, we need to create a [`Reference`](/docs/references) and pass that to the
+[`Img`](/api/2d/components/Img):
+
+<Tabs groupId="language" queryString>
+<TabItem value="tsx" label="TSX">
+
+```tsx
+// ...
+import {all, createRef} from '@canvas-commons/core';
+
+export default makeScene2D(function* (view) {
+  const imageRef = createRef<Img>();
+
+  view.add(<Img ref={imageRef} src={examplePng} scale={2} />);
+
+  yield* all(
+    imageRef().scale(2.5, 1.5).to(2, 1.5),
+    imageRef().absoluteRotation(90, 1.5).to(0, 1.5),
+  );
+});
+```
+
+</TabItem>
+<TabItem value="ts" label="TS">
+
+```ts
+// ...
+import {all} from '@canvas-commons/core';
+
+export default makeScene2D(function* (view) {
+  const imageRef = new Img({src: examplePng, scale: 2});
+
+  view.add(imageRef);
+
+  yield* all(
+    imageRef.scale(2.5, 1.5).to(2, 1.5),
+    imageRef.absoluteRotation(90, 1.5).to(0, 1.5),
+  );
+});
+```
+
+</TabItem>
+</Tabs>
+
+<AnimationPlayer name="media-image" small />
+
+### Supported Formats
+
+A list of supported file formats can be found
+[here](https://developer.mozilla.org/en-US/docs/Web/Media/Formats/Image_types)
+
+## Video
+
+Videos in Canvas Commons work similar to images. First, we need to import our
+video we want to display:
+
+```ts
+// my-animation/
+// ├─ videos/
+// │  └─ example.mp4
+// ├─ src/
+// ...
+import exampleMp4 from '../../videos/example.mp4';
+```
+
+Then we can use Canvas Commons [`Video`](/api/2d/components/Video) component to
+display the video as follows:
+
+<Tabs groupId="language" queryString>
+<TabItem value="tsx" label="TSX">
+
+```tsx
+import {makeScene2D, Video} from '@canvas-commons/2d';
+
+import exampleMp4 from '../../videos/example.mp4';
+
+export default makeScene2D(function* (view) {
+  view.add(<Video src={exampleMp4} />);
+});
+```
+
+</TabItem>
+<TabItem value="ts" label="TS">
+
+```ts
+import {makeScene2D, Video} from '@canvas-commons/2d';
+
+import exampleMp4 from '../../videos/example.mp4';
+
+export default makeScene2D(function* (view) {
+  view.add(new Video({src: exampleMp4}));
+});
+```
+
+</TabItem>
+</Tabs>
+
+However this will only display the video and will not play it. In order to play
+the video we need to create a [`Reference`](/docs/references) to the element.
+
+<Tabs groupId="language" queryString>
+<TabItem value="tsx" label="TSX">
+
+```tsx
+// ...
+import {createRef} from '@canvas-commons/core';
+
+export default makeScene2D(function* (view) {
+  const videoRef = createRef<Video>();
+
+  view.add(<Video ref={videoRef} src={exampleMp4} />);
+});
+```
+
+</TabItem>
+<TabItem value="ts" label="TS">
+
+```ts
+// ...
+
+export default makeScene2D(function* (view) {
+  const videoRef = new Video({src: exampleMp4});
+
+  view.add(videoRef);
+});
+```
+
+</TabItem>
+</Tabs>
+
+Now that we have a [`Reference`](/docs/references) to the
+[`Video`](/api/2d/components/Video) element, we can use it to animate the video,
+as well as [`play`](/api/2d/components/Video#play) and
+[`pause`](/api/2d/components/Video#pause) it.
+
+```ts
+export default makeScene2D(function* (view) {
+  // ...
+
+  videoRef.play();
+  yield* videoRef.scale(1.25, 1.5).to(1, 1.5);
+});
+```
+
+### Supported Formats
+
+A list of supported file formats can be found
+[here](https://developer.mozilla.org/en-US/docs/Web/Media/Formats/Containers)

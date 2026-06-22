@@ -1,0 +1,23 @@
+{
+  "skill_name": "canvas-commons-animations",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "In the canvas-commons repo at /Users/dan/tmp/3p/canvas-commons, create a short animation that visually explains a token bucket rate limiter: tokens drip into a bucket at a fixed rate, requests arrive and either consume a token (allowed) or get rejected when the bucket is empty. Add it as a scene in the template package, get it building, and render some frames so we can see it actually works.",
+      "expected_output": "A new scene .tsx + .meta in packages/template/src/scenes, registered in project.ts, that passes `pnpm template:build`, and rendered PNG frames the agent inspected. The animation should legibly show tokens accumulating, a request consuming a token, and a request being rejected on an empty bucket, with no off-screen or overlapping elements.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I have a Motion Canvas / canvas-commons scene that builds fine but looks wrong when it plays — some labels seem to overlap the boxes and I think something runs off the edge. The repo is at /Users/dan/tmp/3p/canvas-commons and the scene is the one wired into packages/template. Can you figure out what's visually broken and fix it?",
+      "expected_output": "The agent runs the dev server and the frame-capture loop, reads rendered frames to locate the actual visual defects (not just reads the source), fixes the scene, and re-captures to confirm. Success is evidence the agent used rendered frames as the diagnostic, not guesswork.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Make a clean 5-second animation of a bouncing ball with a squash-and-stretch effect and a fading motion trail, in canvas-commons. Put it in the template package and export it to an mp4 I can watch.",
+      "expected_output": "A scene that builds, renders, and is encoded to an mp4 via the capture script's --all/--encode path (or ffmpeg). Frames inspected for the squash/stretch at impact and a visible trail. The mp4 file exists.",
+      "files": []
+    }
+  ]
+}
