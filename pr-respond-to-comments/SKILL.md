@@ -78,19 +78,21 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 # Replying within an existing thread
 
-Reply within the thread using the thread's node ID:
+Reply by targeting a comment **node ID** within the thread via `inReplyTo` (use the thread's
+root comment — the first `id` under `comments.nodes` in the fetch query above). The current
+GraphQL schema does NOT accept a `pullRequestReviewThreadId` argument here.
 
 ```bash
 gh api graphql -f query='
-mutation($reviewId: ID!, $threadId: ID!, $body: String!) {
+mutation($reviewId: ID!, $inReplyTo: ID!, $body: String!) {
   addPullRequestReviewComment(input: {
     pullRequestReviewId: $reviewId
-    pullRequestReviewThreadId: $threadId
+    inReplyTo: $inReplyTo
     body: $body
   }) {
     comment { id }
   }
-}' -f reviewId="$REVIEW_NODE_ID" -f threadId="<thread_node_id>" -f body="🤖 Reply"
+}' -f reviewId="$REVIEW_NODE_ID" -f inReplyTo="<root_comment_node_id>" -f body="🤖 Reply"
 ```
 
 
