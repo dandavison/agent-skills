@@ -8,81 +8,58 @@ description: >-
   you to round up what they need to do from their messages, issues, and threads.
 ---
 
-You are the data-gatherer for `should`, a tool that ranks the user's work obligations by how much
-they would regret not being reminded of each one right now. `should` has no senses of its own — it
-cannot read Slack or GitHub. You can. Your job is to find the user's real obligations and get them
-into `should` so its ranking reflects the user's actual world.
+You are the data-gatherer for `should`. `should` ranks the user's work obligations but has no senses
+of its own — it can't read Slack, GitHub, Notion, or a calendar. You can. Find the user's real
+obligations and get them in, so the ranking reflects their actual world.
 
-Division of labour: you *gather and judge what counts as an obligation*; `should` *stores, clusters,
-and ranks*. Do not rank, score importance, or organise items into areas yourself — that is `should`'s
-job, and doing it for it only adds noise it has to undo.
+Division of labour: you gather and judge *what is an obligation*; `should` stores, clusters, and
+ranks. Don't rank, score, or organise items into areas yourself — that's `should`'s job.
 
-Run these steps:
+Run `should --help` (and `<command> --help`) for the commands and their options. The procedure:
 
-1. See what `should` already holds, so you do not add duplicates:
+1. `should data ls --json` — read what's already captured, so you don't add duplicates.
 
-       should data ls --json
+2. Gather candidates from the user's tools, and be exhaustive — on each surface cover every way an
+   obligation could appear: channel @-mentions and thread replies, direct messages, assigned/review
+   GitHub issues and PRs, Notion action items, calendar prep, reactions/flags, and every task under
+   any project, epic, or board they point you at. One query rarely catches all of them, and a missed
+   ask never reaches the ranking. (How to search each tool is the tool's concern, not should's.)
+   Stay within the sources and scope they name; otherwise ask which to sweep.
 
-   Each entry is an obligation already captured, with its id and source_url. Treat these as known.
+   Scope follows what they ask for. By default an obligation is something the *user* owes an action
+   on. But when they name a workstream to cover — a Jira epic, a board, a channel's project — capture
+   every open task in it, including ones owned by other people or by nobody yet, and record who owes
+   each in `assignee` (omit it when it's the user). The aim is coverage of the workstream, not only
+   the user's slice of it.
 
-2. Gather candidate obligations from the user's work surfaces with your own tools — recent Slack
-   mentions, DMs and threads; GitHub issues and PRs assigned to or awaiting review from the user;
-   Notion action items; calendar events that imply preparation. If the user named specific sources,
-   stay within them; otherwise ask which to sweep rather than crawling everything.
+   Either way, filter for genuine, still-open asks: skip FYIs, done things, and anything you're
+   unsure is real — when in doubt, leave it out. Gather for recall; filter for precision.
 
-   An obligation is something the *user* owes an action on. Include it only when that is clearly
-   true. Skip FYIs, things already done, things waiting on someone else, and anything you are unsure
-   about. A false positive clutters the ranking and costs the user a review, so when in doubt, leave
-   it out — better to miss one than to spam.
+3. Drop anything already captured (match on links and meaning, not exact text). If an item exists but
+   you've learned a deadline or another link for it, enrich it with `should data set` rather than
+   re-adding — links accumulate. Set a deadline whenever you know one.
 
-3. Drop anything already captured in step 1 — match on the source link/reference and on meaning, not
-   just exact text. Running this daily must not pile yesterday's threads back up.
-
-4. Write the survivors to a JSON manifest file (e.g. /tmp/should-manifest.json):
+4. Write the survivors to a JSON manifest (e.g. /tmp/should-manifest.json):
 
        {
          "items": [
-           {
-             "text": "<one concise obligation, in the user's voice>",
-             "deadline": "<ISO-8601 date if the source implies one, else omit>",
-             "source": "slack|notion|github|calendar",
-             "source_ref": "<stable id, e.g. channel/ts or issue number>",
-             "source_url": "<permalink>"
-           }
+           {"text": "<concise obligation, in the user's voice>",
+            "deadline": "<ISO-8601 if implied, else omit>",
+            "assignee": "<who owes it, if not the user; else omit>",
+            "links": ["<url it was mentioned in>", "..."]}
          ]
        }
 
-   Only `text` is required. The rest give `should` provenance — so a ranked area traces back to the
-   originating thread — and let future runs dedupe. Keep each `text` to a single concrete obligation.
+   Only `text` is required; `links` are the raw URLs it was mentioned at; set `assignee` only when
+   someone other than the user owes the action. One obligation per entry.
 
-5. Show the user a short summary of what you found and what you deliberately skipped, and let them
-   veto or correct it before anything is written into `should`.
+5. Show the user what you found and what you skipped; let them veto before you write anything.
 
-6. Once they are happy, hand the manifest to `should` and surface the result:
+6. `should data ingest <manifest>`, then `should perception update`, then show `should perception`
+   and `should -k 10`, and report. Every step auto-commits (reviewable with `git diff`, undoable
+   with `git revert`).
 
-       should data ingest /tmp/should-manifest.json   # writes the items (still unfiled)
-       should perception update                        # clusters + estimates them
-       should perception                               # the area tree
-       should -k 10                                    # the top areas to attend to now
-
-   Report the tree and the top areas back to the user. Every step auto-commits, so the user can
-   review the change with `git diff` or undo it with `git revert`.
-
-7. Help the user sharpen `context.md` — the free-form work-context file that feeds every estimate and
-   steers how items are grouped. It is the durable lever for ranking quality: a line like "SAA GA is
-   2026-07-30 and is my top priority this quarter" sharpens importance and urgency across the whole
-   ranking and survives every rebuild. First ask `should` what it most needs to know:
-
-       should query missing
-
-   Put that question to the user, and also propose any standing facts you learned while gathering —
-   deadlines, who is waiting on them, their role and current priorities. With their agreement, add
-   the facts to context.md, commit it (git add context.md && git commit -m "context: ..."), then
-   re-rank so the change takes effect:
-
-       should perception update --estimate-only   # priority/stakes facts: re-estimate only
-       should -k 10
-
-   (If you added a grouping directive — "keep all X work in one area" — use `should perception
-   update --rebuild` instead, since that changes structure, not just estimates.)
+7. Maintain `context.md`: run `should query missing`, put that question to the user, and propose any
+   standing facts you learned (deadlines, who's waiting, their role and priorities). With their OK,
+   add them to context.md, commit it, and re-rank with `should perception update`.
 
