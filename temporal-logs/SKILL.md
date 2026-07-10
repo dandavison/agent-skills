@@ -93,7 +93,7 @@ These queries can touch gigabytes. Before running anything broad:
 
 ## When access fails
 
-The CLI auto-starts the port-forward via `omni`. If `omni` isn't on PATH or auth is needed,
+The CLI auto-starts the port-forward via `ct`. If `ct` isn't on PATH or auth is needed,
 it prints the exact manual command. Since that command is long-running and may need
 interactive auth, ask the user to start it themselves — in a Claude Code session they can
 run it with the `!` prefix — then re-run with `--addr http://localhost:3100` (or set
