@@ -44,25 +44,29 @@ Subcommands:
 
 ## How to use it
 
-1. **Pick the environment.** `--env prod` (default) or `--env test`. Prod covers the
-   production cells; test covers the test/staging cells.
-2. **Discover selectors if unsure.** `temporal-logs labels cluster` lists cluster ids;
-   `temporal-logs labels k8s_container` lists container names. This avoids guessing.
+1. **Pick the environment.** `--env prod` (default) or `--env test`. Prod holds the
+   customer-serving fleet — `p-*`, `o-*`, `c-prod-*`, the ring cells `s-aw*`/`s-gc*`/etc.,
+   and named cells like `newton`; test holds dev/bench/release cells (`s-wlkr-*`,
+   `s-cgsrel-*`, `s-compute-*`, …). The `s-` prefix appears in both, so don't infer the
+   env from it — if a cluster id returns nothing, it's probably in the other env.
+2. **Discover selectors if unsure.** `temporal-logs labels cluster` (add `--env test` for
+   the test fleet) lists cluster ids; `temporal-logs labels k8s_container` lists container
+   names. This avoids guessing.
 3. **Query.** Start the selector as narrow as you can, then filter. Keep the time window
    tight — queries scan a lot of data.
 
 ```bash
-# Recent history-service logs in a cell
-temporal-logs query '{cluster="s-cd015", k8s_namespace="temporal", k8s_container="history"}' --since 30m
+# Recent history-service logs in a prod cell
+temporal-logs query '{cluster="s-aw031", k8s_namespace="temporal", k8s_container="history"}' --since 30m
 
 # Errors only, as JSON objects (for further processing)
-temporal-logs query '{cluster="s-cd015", k8s_container="history"} |= `"level":"error"`' -o jsonl --since 1h
+temporal-logs query '{cluster="s-aw031", k8s_container="history"} |= `"level":"error"`' -o jsonl --since 1h
 
-# Top 10 error causes in the last hour (metric query)
-temporal-logs query 'topk(10, sum(count_over_time({cluster="s-cd015", k8s_container=~"frontend|matching|history|worker"} |= "error" | json | level="error")) by (error))' --instant --since 1h
+# Top 10 error causes in the last hour (metric query — note the [1h] range in the query)
+temporal-logs query 'topk(10, sum(count_over_time({cluster="s-aw031", k8s_container=~"frontend|matching|history|worker"} |= "error" | json | level="error" [1h])) by (error))' --instant --since 1h
 
-# A specific historical window, test environment
-temporal-logs query '{cluster="s-cd015"} |= "shard ownership lost"' --env test \
+# A specific historical window, on a test cell
+temporal-logs query '{cluster="s-wlkr-a-aws395"} |= "shard ownership lost"' --env test \
   --from 2025-08-10T15:03:59Z --to 2025-08-10T19:04:16Z
 ```
 
@@ -78,9 +82,11 @@ The full cheat-sheet is in `temporal-logs query --help`; the key mental model:
 - **Parse then filter non-indexed fields** — most logs are JSON: append `| json` and you
   can filter any field, e.g. `| json | level="error"` or `| json | grpc_time_ms > 200`.
   `| json` adds real overhead, so filter with line filters first where possible.
-- **Metric queries** aggregate: `count_over_time`, `sum(...) by (label)`, `topk`. Pass
-  `--instant` for a single snapshot or `--step 1m` for a time series; when you do, omit the
-  trailing `[range]` — the CLI supplies it from the time window.
+- **Metric queries** aggregate: `count_over_time`, `sum(...) by (label)`, `topk`. The range
+  selector (`[5m]`, `[1h]`) is part of the LogQL and is **required** inside
+  `count_over_time(...)` — the CLI does not add it. Pass `--instant` for a single snapshot
+  or `--step 1m` for a time series; those control when/how often the query is evaluated,
+  not the range vector.
 
 ## Cost discipline
 
