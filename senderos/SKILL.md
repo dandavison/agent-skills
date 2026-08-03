@@ -29,13 +29,29 @@ and any unambiguous prefix will do — `senderos show 7daeb` is enough.
 
 ## Worth knowing
 
-- The index is a cache over transcript files. It is not updated automatically;
-  if `changed_since` is non-zero in `senderos status`, run `senderos sync`.
+- Every command prints the next one to run, with the id filled in. Follow it
+  rather than spending a call on `--help`.
+- Matching is case-insensitive and stemmed: `relocate` finds "relocating".
 - Tool calls and their output are not indexed, so `search` matches what was
   said, not what was run. Use `senderos cat <id> --tools` to see commands.
 - Context size is the peak the sendero reached, not a sum of its turns.
+- The index is a cache over transcript files, refreshed by `senderos sync`.
+  Do not sync unprompted: it is the user's call, and results are usually fine
+  without it.
 
 ## Commands
+
+### `senderos agent [PROMPT]`
+
+Start a coding agent with the senderos skill loaded.
+
+- `--with` — Which coding agent to start.
+
+```
+$ senderos agent                                    # pi, knowing this tool
+$ senderos agent --with opencode
+$ senderos agent "pick up the compaction work"      # with a first message
+```
 
 ### `senderos cat ID`
 
