@@ -46,11 +46,11 @@ and any unambiguous prefix will do — `senderos show 7daeb` is enough.
 Start a coding agent with the senderos skill loaded.
 
 - `--with` — Which coding agent to start.
-- `--model` — Which model it should run, as provider/model.
+- `--model` — Which model it should run, named as that agent names it.
 
 ```
 $ senderos agent                                    # pi, knowing this tool
-$ senderos agent --with opencode
+$ senderos agent --with qwen
 $ senderos agent --model anthropic/claude-opus-5
 $ senderos agent "pick up the compaction work"      # with a first message
 ```
