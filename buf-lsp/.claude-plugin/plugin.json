@@ -1,0 +1,14 @@
+{
+  "name": "buf-lsp",
+  "description": "Buf language server for Protobuf code intelligence",
+  "version": "1.0.0",
+  "lspServers": {
+    "buf": {
+      "command": "buf",
+      "args": ["lsp", "serve"],
+      "extensionToLanguage": {
+        ".proto": "protobuf"
+      }
+    }
+  }
+}
