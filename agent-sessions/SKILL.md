@@ -62,6 +62,15 @@ Print a session as markdown, read from the transcript itself.
 - `--tools` — Include tool calls and their output.
 - `--whole` — Include branches that were abandoned.
 
+### `agent-sessions forget ID`
+
+Take a session out of the index, and its transcript out of the agent's reach.
+
+```
+$ agent-sessions forget claude:7e90a7c6       # by the id Claude prints as it exits
+$ agent-sessions forget 7e90a7c6              # or any unambiguous prefix of it
+```
+
 ### `agent-sessions ls`
 
 List sessions, most recent first. No text matching; use `search` for that.
@@ -73,11 +82,21 @@ List sessions, most recent first. No text matching; use `search` for that.
 - `-n, --limit` — How many at most.
 - `--sort` — Order by recency, peak context, or number of turns.
 
-### `agent-sessions resume ID`
+### `agent-sessions rename ID TITLE`
+
+Give a session a title of my own, in place of the one it was given.
+
+### `agent-sessions resume ID[@POINT]`
 
 Pick a session back up, in the worktree it belongs to.
 
 - `--fork` — Branch into a new session, leaving this one as it is.
+
+```
+$ agent-sessions resume claude:7e90a7c6             # where it was left
+$ agent-sessions resume claude:7e90a7c6 --fork      # branch, leaving it as it is
+$ agent-sessions resume claude:7e90a7c6@9f3c1d20    # from a point inside it
+```
 
 ### `agent-sessions search QUERY`
 
@@ -102,6 +121,14 @@ $ agent-sessions search compaction -p temporal --since 2w
 $ agent-sessions search compaction --min-context 500k -n 5
 $ agent-sessions search compaction -q | head -1       # bare id, to pipe
 ```
+
+### `agent-sessions serve`
+
+Serve the index in a browser, where a link is enough to resume.
+
+- `--port` — Which port to listen on.
+- `--host` — Which address to bind.
+- `--open` — Open a browser at it.
 
 ### `agent-sessions show ID`
 
