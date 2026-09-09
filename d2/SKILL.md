@@ -3,10 +3,27 @@ name: d2
 description: |
   The D2 diagram language: language reference, examples, and CLI documentation,
   generated from the D2 source and docs repositories vendored in this skill.
+  Diagrams are rendered with the TALA layout engine.
 ---
 
 
 # D2
+
+Render with TALA, D2's layout engine for software architecture diagrams; use another
+engine only when asked:
+
+```sh
+d2 --layout=tala in.d2 out.svg
+d2 validate in.d2
+d2 fmt in.d2
+```
+
+Two things below are stale: `d2 --help` and the tour present `dagre` as the default,
+and `tour/tala.md` calls TALA proprietary, paid, and a separate install. As of v0.9.0
+TALA is bundled with `d2` and open source.
+
+
+## Sources
 
 Everything below is upstream material, assembled by `/Users/dan/src/devenv/skills/d2/generate-skill`
 (regenerate with `make d2`) from:
@@ -16,23 +33,6 @@ Everything below is upstream material, assembled by `/Users/dan/src/devenv/skill
 - `d2` on PATH — v0.9.0
 
 Upstream material that is not inlined here is listed at the end.
-
-
-## Rendering
-
-Default to TALA, D2's layout engine for software architecture diagrams:
-
-```sh
-d2 --layout=tala in.d2 out.svg
-d2 validate in.d2
-d2 fmt in.d2
-```
-
-Use `dagre` (the CLI default) or `elk` for plain hierarchies, or when asked for them.
-
-Where the language docs below contradict the CLI output or the D2 source vendored in
-this skill, the source wins. Known staleness: `tour/tala.md` describes TALA as a
-separate, proprietary install; as of v0.9.0 TALA is bundled with `d2` and open source.
 
 
 ## CLI
