@@ -1,0 +1,403 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""Generate SKILL.md for the d2 skill from the vendored D2 source and docs repos.
+
+Run via `make d2` from the skills repo root.
+"""
+
+import json
+import re
+import subprocess
+import sys
+from itertools import pairwise
+from pathlib import Path
+from typing import NoReturn
+
+SKILL_DIR = Path(__file__).resolve().parent
+D2_REPO = SKILL_DIR / "d2"
+DOCS_REPO = SKILL_DIR / "d2-docs"
+OUT = SKILL_DIR / "SKILL.md"
+
+# Language docs to inline, in sidebar order (d2-docs/sidebars.ts). Pages about installing
+# D2, editor plugins, the Go API, the cheat sheet PDF, and the project itself are omitted;
+# they are listed at the end of the skill instead.
+TOUR = [
+    "hello-world", "shapes", "connections", "containers",
+    "text", "icons", "sql-tables", "uml-classes", "sequence-diagrams", "grid-diagrams",
+    "themes", "style", "classes", "dimensions", "positions", "sketch", "interactive",
+    "fonts", "layouts", "dagre", "elk", "tala",
+    "strings", "vars", "globs", "comments", "overrides", "models", "legend",
+    "auto-formatter",
+    "composition", "layers", "scenarios", "steps", "linking", "composition-formats",
+    "imports", "imports-use-cases", "model-view", "modular-classes",
+    "nested-composition", "version-visualization", "imported-template",
+    "exports", "troubleshoot",
+]  # fmt: skip
+
+
+def main() -> None:
+    sections = [
+        frontmatter(),
+        provenance(),
+        rendering(),
+        cli_reference(),
+        vocabulary(),
+        language_tour(),
+        tala_gallery(),
+        repo_examples(),
+        further_material(),
+    ]
+    body = "\n".join(sections)
+    OUT.write_text(body)
+    print(f"{OUT}: {len(body) / 1024:.0f} KiB, {body.count('\n') + 1} lines")
+
+
+def frontmatter() -> str:
+    return (
+        "---\n"
+        "name: d2\n"
+        "description: |\n"
+        "  The D2 diagram language: language reference, examples, and CLI documentation,\n"
+        "  generated from the D2 source and docs repositories vendored in this skill.\n"
+        "---\n"
+    )
+
+
+def provenance() -> str:
+    return f"""
+# D2
+
+Everything below is upstream material, assembled by `{SKILL_DIR}/generate-skill`
+(regenerate with `make d2`) from:
+
+- `{D2_REPO}` — D2 source, {git_version(D2_REPO)}
+- `{DOCS_REPO}` — D2 language docs, {git_version(DOCS_REPO)}
+- `d2` on PATH — {run("d2", "--version").strip()}
+
+Upstream material that is not inlined here is listed at the end.
+"""
+
+
+def rendering() -> str:
+    return """
+## Rendering
+
+Default to TALA, D2's layout engine for software architecture diagrams:
+
+```sh
+d2 --layout=tala in.d2 out.svg
+d2 validate in.d2
+d2 fmt in.d2
+```
+
+Use `dagre` (the CLI default) or `elk` for plain hierarchies, or when asked for them.
+
+Where the language docs below contradict the CLI output or the D2 source vendored in
+this skill, the source wins. Known staleness: `tour/tala.md` describes TALA as a
+separate, proprietary install; as of v0.9.0 TALA is bundled with `d2` and open source.
+"""
+
+
+def cli_reference() -> str:
+    commands = [
+        ("d2", "--help"),
+        ("d2", "layout"),
+        ("d2", "layout", "tala"),
+        ("d2", "themes"),
+    ]
+    out = ["\n## CLI\n"]
+    for command in commands:
+        out.append(f"### `{' '.join(command)}`\n\n{fence(run(*command), '')}\n")
+    return "\n".join(out)
+
+
+def vocabulary() -> str:
+    keywords = D2_REPO / "d2ast/keywords.go"
+    target = D2_REPO / "d2target/d2target.go"
+    groups = [
+        ("Keywords", go_map_keys(keywords, "SimpleReservedKeywords")),
+        ("Keywords that only hold a map", go_map_keys(keywords, "ReservedKeywordHolders")),
+        ("Keywords that hold a value or a map",
+         go_map_keys(keywords, "CompositeReservedKeywords")),
+        ("Keywords that create a new board", go_map_keys(keywords, "BoardKeywords")),
+        ("`style.*` keywords", go_map_keys(keywords, "StyleKeywords")),
+        ("`shape` values", go_slice(target, "Shapes")),
+        ("`*-arrowhead.shape` values", go_map_keys(target, "Arrowheads")),
+        ("`near` constants", go_slice(keywords, "NearConstantsArray")),
+        ("`label.near` and `icon.near` positions",
+         go_slice(keywords, "LabelPositionsArray")),
+        ("`tooltip.near` positions", go_slice(keywords, "TooltipPositionsArray")),
+        ("`style.fill-pattern` values", go_slice(keywords, "FillPatterns")),
+        ("`style.text-transform` values", go_slice(keywords, "TextTransforms")),
+    ]  # fmt: skip
+    out = [
+        "\n## Vocabulary\n",
+        (
+            "Exhaustive lists, extracted from `d2ast/keywords.go`, `d2target/d2target.go`,"
+            " and `d2lsp/completion.go` in the D2 source.\n"
+        ),
+    ]
+    for title, values in groups:
+        out.append(f"- {title}: {', '.join(f'`{value}`' for value in values)}")
+    out.append("\n### Value ranges\n")
+    out.append(value_ranges())
+    return "\n".join(out) + "\n"
+
+
+def language_tour() -> str:
+    out = ["\n## Language tour\n"]
+    for name in TOUR:
+        path = tour_path(name)
+        page = demote(clean_mdx(path.read_text(), path), 2)
+        title = re.match(r"### (.+)\n", page)
+        if title is None:
+            fail(f"{path}: page does not start with a heading")
+        sourced = f"### {title.group(1)} — `{path.relative_to(DOCS_REPO)}`\n"
+        out.append(page.replace(title.group(0), sourced, 1))
+    return "\n".join(out)
+
+
+def tala_gallery() -> str:
+    path = DOCS_REPO / "docs/examples/tala.md"
+    examples = re.findall(
+        r"name:\s*'([^']*)',\s*svgContent:[^\n]*\n\s*code:\s*(\"(?:[^\"\\]|\\.)*\")",
+        path.read_text(),
+    )
+    require(len(examples) > 5, f"{path}: only {len(examples)} examples extracted")
+    out = ["\n## Example gallery: diagrams laid out by TALA\n"]
+    for name, code in examples:
+        out.append(f"### {name}\n\n{fence(json.loads(code))}\n")
+    return "\n".join(out)
+
+
+def repo_examples() -> str:
+    paths = [
+        D2_REPO / "docs/flow.d2",
+        *sorted((D2_REPO / "docs/examples").rglob("*.d2")),
+    ]
+    out = ["\n## Example diagrams from the D2 repository\n"]
+    for path in paths:
+        out.append(f"### `{path.relative_to(D2_REPO)}`\n\n{fence(path.read_text())}\n")
+    return "\n".join(out)
+
+
+def further_material() -> str:
+    tour = (DOCS_REPO / "docs/tour").glob("*.md*")
+    omitted = sorted(page.stem for page in tour if page.stem not in TOUR)
+    diagrams = sorted(
+        (
+            (p.stat().st_size, p.name)
+            for p in (D2_REPO / "e2etests/testdata/files").glob("*.d2")
+        ),
+        reverse=True,
+    )
+    largest = ", ".join(f"`{name}`" for _, name in diagrams[:10])
+    return f"""
+## Further material in the vendored repos
+
+Paths are relative to `{SKILL_DIR}`.
+
+- `d2-docs/docs/tour/` — tour pages not inlined above: {", ".join(omitted)}.
+- `d2-docs/static/d2/` — the D2 source of every example in the tour, one file each.
+- `d2-docs/docs/examples/dagre.md` and `elk.md` — more galleries, laid out by those
+  engines.
+- `d2/e2etests/testdata/files/` — {len(diagrams)} test diagrams, many of them real-world
+  architecture diagrams. Largest first: {largest}.
+- `d2/e2etests/*_test.go` — named feature-by-feature diagram snippets.
+- `d2/d2compiler/compile_test.go` and `d2/d2ir/` — compiler semantics, including the
+  errors D2 reports for invalid programs.
+- `d2/ci/release/changelogs/` — release notes; `next.md` covers the unreleased version.
+- `d2/d2layouts/d2talalayout/README.md` and `ARCHITECTURE.md` — how TALA works, and its
+  Go API.
+- `d2/ci/release/template/man/d2.1` — man page.
+- `d2/docs/assets/cheat_sheet.pdf` — one-page language cheat sheet.
+- `d2/docs/examples/lib/` — driving D2 as a Go library.
+- Icons for the `icon` keyword: https://icons.d2lang.com.
+"""
+
+
+def tour_path(name: str) -> Path:
+    matches = list((DOCS_REPO / "docs/tour").glob(f"{name}.md*"))
+    require(len(matches) == 1, f"expected one tour page named {name}, found {matches}")
+    return matches[0]
+
+
+def clean_mdx(src: str, path: Path) -> str:
+    """Turn a docusaurus page into plain markdown, inlining the D2 sources it imports."""
+    src = re.sub(r"\A---\n.*?\n---\n", "", src, flags=re.DOTALL)
+    imports = dict(
+        re.findall(r"^import (\w+) from '@site/(\S+?)';$", src, flags=re.MULTILINE)
+    )
+    src = re.sub(r"^import .*$\n", "", src, flags=re.MULTILINE)
+    src = re.sub(
+        r"<CodeBlock[^>]*>\s*\{(\w+)\}\s*</CodeBlock>",
+        lambda match: imported_d2(match.group(1), imports, path),
+        src,
+    )
+    src = re.sub(r"<div\b.*?</div>", "", src, flags=re.DOTALL)
+    src = re.sub(
+        r"<(?:WebPImage|embed|video|img|source)\b[^>]*?/?>", "", src, flags=re.DOTALL
+    )
+    src = re.sub(r"^:::\w*.*$\n?", "", src, flags=re.MULTILINE)
+    src = drop_empty_sections(src)
+    src = re.sub(r"\n{3,}", "\n\n", src).strip() + "\n"
+    leftover = [
+        line
+        for line in src.splitlines()
+        if re.search(r"<CodeBlock|<div|require\(|@site/", line)
+    ]
+    require(not leftover, f"{path}: unhandled JSX: {leftover[:3]}")
+    return src
+
+
+def imported_d2(name: str, imports: dict[str, str], path: Path) -> str:
+    if name not in imports:
+        fail(f"{path}: <CodeBlock> uses {name}, which is not imported from @site")
+    return fence((DOCS_REPO / imports[name]).read_text())
+
+
+def fence(code: str, language: str = "d2") -> str:
+    """Fence a code block, outrunning any backticks the code itself contains."""
+    longest = max((len(run) for run in re.findall(r"`+", code)), default=0)
+    backticks = "`" * max(3, longest + 1)
+    return f"{backticks}{language}\n{code.strip()}\n{backticks}"
+
+
+def drop_empty_sections(markdown: str) -> str:
+    """Drop headings left content-free by the images the docs render but this skill omits."""
+    lines = markdown.splitlines()
+    headings = [(i, len(m.group(1))) for i, m in headings_in(lines)]
+    headings.append((len(lines), 0))
+    empty = {
+        i
+        for (i, level), (next_i, next_level) in pairwise(headings)
+        if next_level <= level
+        and not any(line.strip() for line in lines[i + 1 : next_i])
+    }
+    return "\n".join(line for i, line in enumerate(lines) if i not in empty)
+
+
+def headings_in(lines: list[str]) -> list[tuple[int, re.Match[str]]]:
+    """Locate markdown headings, ignoring code fences: `#` is a comment in D2 and shell."""
+    found: list[tuple[int, re.Match[str]]] = []
+    fenced = False
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            fenced = not fenced
+        elif not fenced and (match := re.match(r"(#{1,6}) ", line)):
+            found.append((i, match))
+    return found
+
+
+def demote(markdown: str, levels: int) -> str:
+    """Push headings down, so that a whole page nests under a section of SKILL.md."""
+    chunks = markdown.split("```")
+    for i in range(0, len(chunks), 2):
+        chunks[i] = re.sub(
+            r"^(#{1,6}) ",
+            lambda match: "#" * min(6, len(match.group(1)) + levels) + " ",
+            chunks[i],
+            flags=re.MULTILINE,
+        )
+    return "```".join(chunks)
+
+
+def go_map_keys(path: Path, symbol: str) -> list[str]:
+    body = go_declaration(path, symbol)
+    entries = re.findall(r"^\t(.+?):\s*\{\},?$", body, flags=re.MULTILINE)
+    keys = [resolve_go_string(path, entry) for entry in entries]
+    require(len(keys) > 0, f"{path}: no keys in {symbol}")
+    return sorted(keys)
+
+
+def go_slice(path: Path, symbol: str) -> list[str]:
+    body = go_declaration(path, symbol)
+    entries = re.findall(r'"[^"]*"|^\t\w+,$', body, flags=re.MULTILINE)
+    values = [resolve_go_string(path, entry.rstrip(",")) for entry in entries]
+    require(len(values) > 0, f"{path}: no entries in {symbol}")
+    return values
+
+
+def go_declaration(path: Path, symbol: str) -> str:
+    src = path.read_text()
+    declaration = rf"^var {re.escape(symbol)} = [^\n]*"
+    multiline = re.search(
+        declaration + r"\{\n(.*?)^\}$", src, flags=re.MULTILINE | re.DOTALL
+    )
+    if multiline is not None:
+        return multiline.group(1)
+    single = re.search(
+        declaration.replace("*", "*?") + r"\{([^{}]*)\}$", src, flags=re.MULTILINE
+    )
+    if single is not None:
+        return single.group(1)
+    fail(f"{path}: no declaration of {symbol}")
+
+
+def resolve_go_string(path: Path, expression: str) -> str:
+    expression = expression.strip()
+    if literal := re.fullmatch(r'"(.*)"', expression):
+        return literal.group(1)
+    reference = re.fullmatch(r"(?:string\()?(\w+)\)?", expression)
+    if reference is None:
+        fail(f"{path}: cannot resolve {expression!r} to a string")
+    constant = reference.group(1)
+    value = re.search(
+        rf'^\t{re.escape(constant)} +(?:\w+ +)?= "([^"]+)"$',
+        path.read_text(),
+        flags=re.MULTILINE,
+    )
+    if value is None:
+        fail(f"{path}: no constant {constant}")
+    return value.group(1)
+
+
+def value_ranges() -> str:
+    body = go_function(D2_REPO / "d2lsp/completion.go", "getValueCompletions")
+    cases = re.findall(
+        r'case ([^:]+):\n\s*return \[\]CompletionItem\{\{\n\s*Label:\s*"([^"]+)",'
+        r'\n[^\n]*\n\s*Detail:\s*"([^"]+)"',
+        body,
+    )
+    require(len(cases) > 5, f"only {len(cases)} value ranges extracted")
+    lines = []
+    for properties, label, detail in cases:
+        keys = ", ".join(f"`{key.strip().strip('"')}`" for key in properties.split(","))
+        lines.append(f"- {keys}: {label.strip('()')}, {detail}")
+    return "\n".join(lines)
+
+
+def go_function(path: Path, name: str) -> str:
+    pattern = rf"^func {re.escape(name)}\(.*?\n(.*?)^\}}$"
+    match = re.search(pattern, path.read_text(), flags=re.MULTILINE | re.DOTALL)
+    if match is None:
+        fail(f"{path}: no func {name}")
+    return match.group(1)
+
+
+def git_version(repo: Path) -> str:
+    return run("git", "-C", str(repo), "describe", "--tags", "--always").strip()
+
+
+def run(*command: str) -> str:
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    require(
+        result.returncode == 0, f"{' '.join(command)} failed: {result.stderr.strip()}"
+    )
+    return result.stdout
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        fail(message)
+
+
+def fail(message: str) -> NoReturn:
+    sys.exit(f"generate-skill: {message}")
+
+
+main()

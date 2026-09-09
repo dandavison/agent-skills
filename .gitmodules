@@ -1,0 +1,6 @@
+[submodule "d2/d2"]
+	path = d2/d2
+	url = https://github.com/d2lang/d2.git
+[submodule "d2/d2-docs"]
+	path = d2/d2-docs
+	url = https://github.com/d2lang/d2-docs.git
