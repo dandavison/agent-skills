@@ -125,8 +125,11 @@ drawing it makes the task look like an unsolicited push.
 Further rules that make these diagrams readable:
 
 - `direction: right`. These flows are wide, not tall.
-- Number the steps in arrow labels whenever the diagram is a sequence. Order is otherwise
-  unrecoverable from a box diagram.
+- Number the steps in arrow labels, following one happy path. Order is otherwise unrecoverable
+  from a box diagram, and a reader who cannot find the entry point reads nothing.
+- Suffix a number with a letter (`6a`, `6b`) for steps that are concurrent, or alternatives, at the
+  same point in the path; say which in the prose. Give a long-lived arrow — a subscription held open
+  across the whole flow — the number of the step that opens it, and say it stays open.
 - Label every arrow that crosses a process or namespace boundary with the actual API —
   `UpdateWorkflowExecution`, `Nexus StartOperation (HTTP)`, `RespondActivityTaskCompleted`. The API
   name is the most informative label available; never write "calls".
