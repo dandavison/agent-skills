@@ -23,6 +23,76 @@ and `tour/tala.md` calls TALA proprietary, paid, and a separate install. As of v
 TALA is bundled with `d2` and open source.
 
 
+## Diagramming an application built on Temporal
+
+Use these conventions for any diagram of a system built on Temporal. They exist to keep apart the
+two things readers conflate: server-side state, and the user code that acts on it.
+
+| Element | Meaning |
+|---|---|
+| A **Temporal** box | Exactly one namespace; label it `Temporal — <namespace>`. Two namespaces are two boxes, since that is a separate Frontend to talk to and in general a separate cell. |
+| A box **inside** a Temporal box | One execution — workflow, activity, Nexus operation, schedule. Server-side state, never code. |
+| A **dashed container** | One worker or client process, holding the user code that corresponds to those executions. Label it with something the reader could run. |
+| A **solid** arrow | A request, drawn sender → receiver. |
+| A **dashed** arrow | A response to a request the other side already made. |
+
+Everything a worker receives arrives on a long poll it already has open, so **every task arrow is
+dashed and points from Temporal to the worker**. Do not draw the poll itself: it is noise, and
+drawing it makes the task look like an unsolicited push.
+
+Further rules that make these diagrams readable:
+
+- `direction: right`. These flows are wide, not tall.
+- Number the steps in arrow labels whenever the diagram is a sequence. Order is otherwise
+  unrecoverable from a box diagram.
+- Label every arrow that crosses a process or namespace boundary with the actual API —
+  `UpdateWorkflowExecution`, `Nexus StartOperation (HTTP)`, `RespondActivityTaskCompleted`. The API
+  name is the most informative label available; never write "calls".
+- Draw executions, not services. Frontend/History/Matching deserve a box only when they are the
+  subject; in an application diagram they are where the reader stops seeing the application.
+- One diagram per question. A topology diagram and a one-request sequence diagram over the same
+  system are two diagrams.
+- Put a `note` near the bottom for anything true of the whole diagram, including whether what is
+  drawn actually exists yet.
+
+Worked example — a workflow calling a Nexus operation another namespace backs with an activity:
+
+```d2
+direction: right
+
+cw: Caller worker — your code {
+  style.stroke-dash: 3
+  wfcode: Workflow code
+}
+
+t1: Temporal — caller namespace {
+  wf: Workflow execution\n(NexusOperation component in its tree)
+}
+
+t2: Temporal — handler namespace {
+  saa: Activity execution
+}
+
+hw: Handler worker — their code {
+  style.stroke-dash: 3
+  handler: Nexus operation handler
+  act: Activity code
+}
+
+api: External API
+
+cw.wfcode -> t1.wf: 1. RespondWorkflowTaskCompleted\n(ScheduleNexusOperation)
+t1.wf -> t2: 2. Nexus StartOperation (HTTP)
+t2 -> hw.handler: 3. Nexus task {style.stroke-dash: 3}
+hw.handler -> t2.saa: 4. StartActivityExecution
+t2 -> hw.act: 5. activity task {style.stroke-dash: 3}
+hw.act -> api: 6. HTTP call
+api -> hw.act: 7. response {style.stroke-dash: 3}
+hw.act -> t2.saa: 8. RespondActivityTaskCompleted
+t2.saa -> t1.wf: 9. Nexus completion callback (HTTP)
+```
+
+
 ## Sources
 
 Everything below is upstream material, assembled by `/Users/dan/src/devenv/skills/d2/generate-skill`
