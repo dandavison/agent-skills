@@ -57,6 +57,8 @@ Further rules that make these diagrams readable:
   system are two diagrams.
 - Put a `note` near the bottom for anything true of the whole diagram, including whether what is
   drawn actually exists yet.
+- When you're done, verify arrow numbering, and verify the rendered output visually, checking for
+  example that it is visually clear to which arrow each arrow label refers.
 
 Worked example — a workflow calling a Nexus operation another namespace backs with an activity:
 
