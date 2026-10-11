@@ -84,7 +84,10 @@ try {
   );
 
   // Start clean so collected frames are exactly this run's output.
-  rmSync(outputRoot, {recursive: true, force: true});
+  // The exporter writes to output/<project name>/. Clearing only this project's directory lets
+  // dev servers for different projects render concurrently.
+  const projectOutput = path.join(outputRoot, info.name);
+  rmSync(projectOutput, {recursive: true, force: true});
   rmSync(outDir, {recursive: true, force: true});
   mkdirSync(outDir, {recursive: true});
   const collected = [];
@@ -93,7 +96,7 @@ try {
     await renderRange(0, seconds);
     console.log('full render complete');
     // Keep sequential names so ffmpeg can consume them directly.
-    for (const src of collectPngs(outputRoot)) {
+    for (const src of collectPngs(projectOutput)) {
       const dest = path.join(outDir, path.basename(src));
       copyFileSync(src, dest);
       collected.push(dest);
@@ -108,7 +111,7 @@ try {
         info.frames - 1,
       );
       await renderRange(frame / info.fps, (frame + 0.999) / info.fps);
-      const fresh = collectPngs(outputRoot).filter(p => !seen.has(p));
+      const fresh = collectPngs(projectOutput).filter(p => !seen.has(p));
       fresh.forEach(p => seen.add(p));
       if (fresh.length === 0) {
         console.log(`fraction ${f}: no frame produced (skipped)`);
@@ -126,7 +129,7 @@ try {
 
   if (collected.length === 0) {
     throw new Error(
-      `No frames found under ${outputRoot}. Is --project-dir the package ` +
+      `No frames found under ${projectOutput}. Is --project-dir the package ` +
         `running the dev server?`,
     );
   }
