@@ -30,7 +30,7 @@
 //   --all                  render every frame instead of sampling
 //   --scale <n>            resolutionScale: 0.5 fast preview, 1 full (default 0.5)
 //   --encode <path.mp4>    after --all, encode the sequence to mp4 via ffmpeg
-//   --timeout <ms>         per-render timeout (default 120000)
+//   --timeout <ms>         editor-load and per-render timeout (default 120000)
 
 import {spawnSync} from 'node:child_process';
 import {existsSync, mkdirSync, readdirSync, rmSync, copyFileSync, statSync} from 'node:fs';
@@ -61,12 +61,14 @@ page.on('console', m => {
 page.on('pageerror', e => problems.push(`pageerror: ${e.message}`));
 
 try {
-  await page.goto(url);
-  await page.waitForSelector('main');
+  // Loading the editor can take longer than Playwright's default 30s when the dev server is
+  // optimizing dependencies or several renders share the machine.
+  await page.goto(url, {timeout});
+  await page.waitForSelector('main', {timeout});
   await page.waitForFunction(
     () => !!window.commons && window.commons.player.playback.duration > 0,
     undefined,
-    {timeout: 30000},
+    {timeout},
   );
 
   const info = await page.evaluate(() => ({
