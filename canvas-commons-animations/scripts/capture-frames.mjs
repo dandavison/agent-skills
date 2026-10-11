@@ -72,11 +72,15 @@ try {
   const info = await page.evaluate(() => ({
     frames: window.commons.player.playback.duration,
     fps: window.commons.player.playback.fps,
+    // The renderer's frame rate (default 60) can differ from the player's
+    // (default 30); rendered PNGs are at this rate.
+    renderFps: window.commons.meta.getFullRenderingSettings().fps,
     name: window.commons.project.name,
   }));
   const seconds = info.frames / info.fps;
   console.log(
-    `project=${info.name} duration=${seconds.toFixed(2)}s fps=${info.fps}`,
+    `project=${info.name} duration=${seconds.toFixed(2)}s ` +
+      `player fps=${info.fps} render fps=${info.renderFps}`,
   );
 
   // Start clean so collected frames are exactly this run's output.
@@ -135,7 +139,7 @@ try {
   );
 
   if (renderAll && args.encode) {
-    encode(collected, info.fps, path.resolve(args.encode));
+    encode(collected, info.renderFps, path.resolve(args.encode));
   }
 } finally {
   await browser.close();
