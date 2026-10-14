@@ -1,8 +1,7 @@
 ---
 name: pr-review
 description: |
-  PR review procedure for AI agents. Use when instructed to review a PR.
-  Triggers: "review", "pr", "code review"
+  PR review procedure for AI agents. Use only when explicitly instructed to use this skill.
 ---
 
 First some general considerations:
