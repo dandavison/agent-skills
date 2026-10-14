@@ -1,0 +1,275 @@
+<title>Stream Worktree Sessions</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; summary tables first, then lineage cards with per-session rows. */
+:root {
+  --bg: #f6f7f8; --surface: #ffffff; --fg: #1d2329; --muted: #5d6873; --line: #dde2e7;
+  --accent: #1f6f8b; --accent-soft: #e3f0f5; --open: #a5590f; --open-soft: #fbecd9; --dim: #9aa4ae;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #13171b; --surface: #1b2127; --fg: #e3e8ec; --muted: #9aa6b1; --line: #2c343c;
+  --accent: #6cb8d4; --accent-soft: #1d3440; --open: #e8a35c; --open-soft: #3a2a18; --dim: #66717c; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #13171b; --surface: #1b2127; --fg: #e3e8ec; --muted: #9aa6b1; --line: #2c343c;
+  --accent: #6cb8d4; --accent-soft: #1d3440; --open: #e8a35c; --open-soft: #3a2a18; --dim: #66717c; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); }
+main { max-width: 1080px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 36px; }
+h1 { font-size: 26px; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 17px; font-weight: 600; margin: 0 0 12px; text-wrap: balance; }
+h3 { font-size: 15px; font-weight: 600; margin: 0; }
+p { margin: 0; max-width: 70ch; }
+.lede { color: var(--muted); margin-top: 6px; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+.pill { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; white-space: nowrap; }
+.pill.open { background: var(--open-soft); color: var(--open); }
+.pill.done { background: var(--accent-soft); color: var(--accent); }
+.pill.rel { border: 1px solid var(--line); color: var(--muted); }
+.sid { font-family: var(--mono); font-size: 12px; background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--fg); padding: 1px 6px; cursor: pointer; white-space: nowrap; }
+.sid:hover, .sid:focus-visible { border-color: var(--accent); outline: none; }
+.sid.copied { border-color: var(--accent); color: var(--accent); }
+.lineage { display: grid; gap: 10px; }
+.lineage > header p { color: var(--muted); }
+.tree { font-family: var(--mono); font-size: 12.5px; white-space: pre; color: var(--muted); padding: 10px 12px; }
+.tree b { color: var(--fg); font-weight: 500; }
+.sess { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; display: grid; gap: 8px; }
+.sess.minor { opacity: .72; }
+.sess-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.sess-head .meta { color: var(--muted); font-size: 12.5px; }
+.sess ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.sess .row { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+.sess .row b { color: var(--fg); font-weight: 500; }
+.reuse { font-size: 13px; }
+.reuse b { font-weight: 600; }
+.phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.phase { border-top: 3px solid var(--accent); padding-top: 8px; display: grid; gap: 4px; min-width: 0; }
+.phase .when { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.phase p { font-size: 13px; }
+.note { font-size: 12.5px; color: var(--muted); }
+details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+</style>
+
+<main>
+<header>
+  <h1>Stream Worktree Sessions</h1>
+  <p class="lede"><span id="scope"></span> Click a session id to copy its <code>agent-sessions resume</code> command. Summaries were written by subagents from transcripts; children of a fork are summarised from the fork point only.</p>
+</header>
+
+<section>
+  <h2>Which session to resume</h2>
+  <div class="scroll"><table id="reuse"><thead><tr><th>For</th><th>Session</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section>
+  <h2>Phases</h2>
+  <div class="phases" id="phases"></div>
+</section>
+
+<section>
+  <h2>Lineages</h2>
+  <div id="lineages" style="display:grid;gap:28px"></div>
+</section>
+
+<section>
+  <h2>Log issues touched</h2>
+  <p class="note" style="margin-bottom:10px">Issues in temporalio/dandavison-log that each session created, posted to, or edited (read-only references included where the summariser could not tell them apart).</p>
+  <div class="scroll"><table id="issues"><thead><tr><th>Issue</th><th>Sessions</th></tr></thead><tbody></tbody></table></div>
+</section>
+</main>
+
+<script>
+// DATA: replace META, PHASES, S and LINEAGES; leave the rendering code below LINEAGES unchanged.
+// S: full session uuid -> {t: title, d: dates, rel: high|medium|low|none, st: open|done,
+//    s: summary, k: key conclusions, i: log issue numbers, f: files/artifacts,
+//    r: what to resume it for, or "none", minor: true to dim it}.
+// LINEAGES: tree entries are [id prefix, depth]; every session in S appears in exactly one lineage.
+const META = {scope: "30 Claude sessions in <code>temporal:stream</code>, 2026-08-08 to 2026-10-13."};
+const PHASES = [
+  ["Aug 08 – Sep 15", "CHASM Stream design", "Roey's notes, TAH study, protos in the api:stream worktree. #297, #298, #299."],
+  ["Sep 15 – Oct 05", "Max and Moe prototypes", "Max's external streams, activity checkpointing, wake, workflow-as-consumer. #378, #379."],
+  ["Sep 29 – Oct 05", "Restart and landscape", "Index of work, competitors, storage COGS, backend interface, conversation history. #392, #394, #395."],
+  ["Oct 06 – Oct 10", "Synthesis and Nexus prep", "#398 synthesis, 10-05 meeting notes, 10-09 streams-over-Nexus session. #403."],
+  ["Oct 10 – Oct 13", "Nexus scenarios", "Scenario proposal and animations, Moe's Brook/Bridge, Roey's notifier model (v2). #405, #406, #407."],
+];
+const S = {
+  "4c25bb91-3181-4210-9a19-f95b6aae955a": {t:"doing", d:"08-08 – 09-15", rel:"high", st:"done",
+    s:"Main CHASM Stream design session. Wrote .task/design.md per scenario, Add/Poll naming from Roey's notes, Poll/Add protos in api:stream. Analysed Roey's standalone alternatives, Johann's native-streams prototype, the Bellevue and 07-23 agent-loop meetings, Max's Nexus/Redis motivations and COGS. Created #299; filled gaps in #298 on 09-15.",
+    k:["Workflow appends via a protocol message on RespondWorkflowTaskCompleted, so no history event","Held stream is created on first append; standalone stream uses StartStreamExecution","Server does not merge subagent streams; client keeps one cursor per stream","Cross-namespace read: handler frontend polls its own stream and returns messages through a Nexus endpoint (our proposal)","Open: continue-as-new, provisional in-memory head, exactly-once across activity retries"],
+    i:[212,298,299], f:[".task/design.md","api:stream protos"], r:"Roey-notes reasoning; Bellevue/Johann/07-23 meeting analysis"},
+  "2e46dd8b-b95d-441f-8608-aa1b652c5591": {t:"agent-harness", d:"08-22 – 09-15", rel:"high", st:"done",
+    s:"Studied temporal-agent-harness (TAH) and how Workflow Streams behaves today, then designed the CHASM stream: StreamRef oneof address, topics as a tag filter on one offset sequence, first Add creates the stream. Updated protos, created #297 and #298, handoff comment on #298.",
+    k:["Activity append must not wake the holding workflow (cited TAH run: 105 WFTs for 22 activities; figure from an AI-written doc)","Poll must be cancellable; today's Update-based poll holds one of ten update slots","Topics are a filter and do not help scale","A completed TAH stream is unreadable: Updates are rejected on closed executions"],
+    i:[212,297,298], f:[".task/tah-event-provenance.html","api:stream protos"], r:"TAH internals; Workflow Streams behaviour; StreamRef protos"},
+  "213008ec-4d63-4aab-8f22-d9d55fc0877a": {t:"AI-198: Streaming from workflow code", d:"09-15 – 09-17", rel:"high", st:"done",
+    s:"Fetched and studied Max's streaming branches, created #378 explaining Max's external workflow streams, then Q&A on retained WFTs, the replay marker and output staging, with diagrams.",
+    k:["Max: payloads outside History, compact marker in History, no server change; consumer side is the larger half","Consumption is cheap because the WFT is held open across activations","Case for native over Redis is not cost (Redis ~10x cheaper per record) but that the server knows the consumers"],
+    i:[378], f:[".task/max-external-streams-walkthrough.html",".task/max-streams-diagrams/"], r:"Details of Max's external-streams prototype"},
+  "07e2cad4-79fd-4bc9-8226-fd4717195073": {t:"activity-streams-checkpt", d:"09-15 – 09-16", rel:"high", st:"done",
+    s:"Assessed Jaime's release-watermark idea for activity-produced streams. Created #379 (activity features for agentic AI). Compared Roey's CHASM Stream API with Workflow Streams in #212.",
+    k:["Append and checkpoint are two durable writes, so send-then-heartbeat is at-least-once","Better: activity reads its own stream tail on attempt start and resumes after it","Most of Roey's API can be added to Workflow Streams; the gap is that a stream has no identity apart from its workflow"],
+    i:[378,379,212], f:[], r:"Activity stream retry/checkpoint semantics"},
+  "03769e70-bcf4-441c-aa79-c39dd16d0848": {t:"streaming:max-moe-activity-checkpointing", d:"09-26 – 10-05", rel:"high", st:"open",
+    s:"Mapped the Roey/Dan CHASM Stream design against Moe's branches, wrote up Max's workflow-to-workflow and wake proposal (#392), and worked through 'one collection for stream and conversation' (#395).",
+    k:["'Metablock as the stream store' came from Moe, not Paul; the store would be OStore","Only a server-side consumer registry is contentious among the meanings of 'cursor'","Moe's SDK conflates topic and stream; lacks close-with-outcome, standalone streams, stream refs as values","One archetype is fine; one collection for stream + conversation is not"],
+    i:[379,392,395], f:[], r:"CHASM Stream archetype vs Moe/Max; stream/conversation collection"},
+  "da0da953-561b-4b0a-b80e-98c9a5b398ba": {t:"max-moe", d:"10-01 – 10-03", rel:"high", st:"done",
+    s:"How Max's design wakes a parked workflow (reserved payload-free Signal). Collected workflow-consumer use cases; steering and guardrails did not hold up.",
+    k:["Steering is a Signal/Update case, unrelated to streaming","Guardrails: workflow can only inspect deterministically; its real role is authority to cancel"],
+    i:[], f:[], r:"none (continued in d2217f75)", minor:true},
+  "d2217f75-fe5a-4a55-9f9a-bf03aa1f32a0": {t:"max-moe-workflow-consume-use-cases", d:"10-03 – 10-04", rel:"high", st:"open",
+    s:"Searched Slack, Notion, the log and past sessions for workflow-as-consumer use cases (#392). Studied TAH's RouterWorkflow and Nexus; checked how long a sync Nexus handler may block. Removed a made-up figure from #379.",
+    k:["No customer asks for workflow-side consumption; connector, agent-framework iterators and map-reduce fan-in hold up","A long-poll read over Nexus needs no spec change; push or multi-result would","Sync Nexus handler budget: default 10s, capped at 60s"],
+    i:[392,379], f:[], r:"Streaming over Nexus; workflow-as-consumer use cases"},
+  "ded97b19-6364-476b-93dd-cb36101bd133": {t:"AI-198 (wake-proposal branch)", d:"10-01 – 10-05", rel:"high", st:"done",
+    s:"Went through Moe's wake notification proposal and cheaper alternatives, walked through Max's watcher and wake Signal, listed gaps. Merged into #392 comment 5995885160.",
+    k:["A wake is needed only when the workflow is parked, has no open task, or is evicted","Moe's wake saves a History event, not the shard write","Free addressing is a DoS risk; wakes should be visible in Describe/UI"],
+    i:[392], f:[], r:"Moe's wake proposal; Max's wake mechanism"},
+  "ec8c4c84-ba9c-4386-a355-5b2c96175139": {t:"AI-198 (duplicate branch)", d:"10-01 – 10-05", rel:"low", st:"done",
+    s:"One-sentence answer on Max's wake Signal; nothing else new.", k:[], i:[], f:[], r:"none", minor:true},
+  "84113357-ac80-4315-a6c0-477dc94f10fe": {t:"streaming:my-work", d:"09-29", rel:"high", st:"open",
+    s:"Restart of the streaming work. Indexed all streaming log issues, Notion pages and prototype branches (#392), then introduced the CHASM Stream design and a proposed Python API next to the Workflow Streams API.",
+    k:["Recommendation: new Python API, with Workflow Streams kept as a thin compatibility layer","Moe's temporalio.streams takes the new-API approach but a workflow can only publish to its own stream","August material is inconsistent on stream creation (first write vs explicit create RPC)"],
+    i:[392], f:[], r:"Index of all streaming work; Python API direction"},
+  "3219b532-e9a0-4d4a-a0c3-09e61a5296cb": {t:"Temporal competitors streaming support", d:"09-29 – 10-05", rel:"high", st:"done",
+    s:"Competitor streaming survey (#392): ephemeral vs durable streams, AI SDK/AG-UI wire formats, comparison table. Cloned ~55 competitor repos to ~/tmp/3p/ai. Added Microsoft and API-chronology comments to #394/#395.",
+    k:["Most platforms ship durable/resumable streams; exceptions Inngest Realtime, Mastra agent.stream(), Restate","No competitor keeps stream data beyond the run","Subagents: parent re-publishes, or child writes into parent's stream","Prompt caching does not cut a durable platform's storage, which grows ~n²/2"],
+    i:[392,394,395], f:["~/tmp/3p/ai"], r:"Competitor streaming landscape and source code"},
+  "b5a32256-bcaa-493c-8e7d-6835fef9eec6": {t:"Streaming backend and interface decisions", d:"09-29 – 10-05", rel:"high", st:"done",
+    s:"Critique of the plan for an SDK-side backend interface (Redis / gRPC) plus a server-side backend (CHASM / hosted Redis). Posted four issues to #392.",
+    k:["Server-side Redis cannot commit atomically with History","SDK spec will be pulled down to the weakest backend; server-only features need a required-behaviour list","Third-party backends make the plug-in interface a second public contract"],
+    i:[392], f:[], r:"Pluggable-backend (Redis vs CHASM) critique"},
+  "f07e1eb4-aa1c-4d3c-b203-10db4033c110": {t:"Streaming storage architecture", d:"09-29 – 10-05", rel:"high", st:"done",
+    s:"Where stream data should be stored in Cloud. Read the CDS flusher to check whether short-lived data reaches Astra. Proposal (ours, unreviewed) revised to keep everything in the planned CHASM ordered storage. Posted to #392.",
+    k:["Nodes added and deleted between flushes never reach Astra; flush after ~40-60s or 1024 records / 2 MiB","A no-flush guarantee is impossible (would hold back the WAL low watermark)","Max's harness port stores model output twice","No COGS measurements exist"],
+    i:[392], f:[], r:"COGS/storage reasoning (WAL, flush, Astra)"},
+  "a7385839-2703-4dcc-bf9b-bc4d133025e6": {t:"Agent conversation history", d:"09-30", rel:"medium", st:"open",
+    s:"Created #395 on agent conversation history (N² resend, 2 MiB limit, continue-as-new, payload handles), then the 'appendable collection' idea and its relation to streams.",
+    k:["Payload handles reduce bytes moved, not bytes rewritten","A separate collection execution cannot commit atomically with the workflow","Stream and conversation could share an append-log layer but stay separate objects"],
+    i:[395], f:[], r:"Conversation history vs stream; appendable collection"},
+  "93b3fca5-4b31-4d99-8abe-a6e90bd83f45": {t:"Agent sessions conversation history storage", d:"09-30", rel:"low", st:"done",
+    s:"Lookup: found earlier sessions on conversation-history storage (f07e1eb4, and 6943ce49/d1c24a69 outside this worktree).", k:[], i:[], f:[], r:"none", minor:true},
+  "a7b9ee74-86b7-41f6-8cf2-e62ad18821f9": {t:"Competitor durable agents survey", d:"09-30", rel:"low", st:"done",
+    s:"Lookup: found Notion 'Temporal Workflows vs. Everyone Else's Workflows', which has a streaming comparison row and a 70+ offering matrix.", k:[], i:[], f:[], r:"none", minor:true},
+  "66994e39-5c4b-475d-9264-246689e05ecc": {t:"Max and Moe prototypes study", d:"09-30", rel:"low", st:"done",
+    s:"Lookup: pointed to 03769e70 as the in-depth study of Max's and Moe's prototypes.", k:[], i:[], f:[], r:"none", minor:true},
+  "c668664f-eb5b-4ddc-b6d3-e9336c2a2794": {t:"Metablock proposal review", d:"09-29", rel:"none", st:"done",
+    s:"Summary of Paul Nordstrom's MetaBlock Notion doc (CHASM-native successor to BatchOperation). Not about streams; doc flagged as largely AI-written.", k:[], i:[], f:[], r:"none", minor:true},
+  "ad97f9f5-c166-4304-aeea-d5a102a96901": {t:"stream-synthesis-1", d:"10-06 – 10-08", rel:"high", st:"done",
+    s:"Started from synthesis #398 (written in session 13dc9ce5 outside this worktree). Posted the 10-05 notification-channel meeting summary to #392 and aligned it with Moe's decision record.",
+    k:["Notification channel paused; PoC uses a raw Signal as the wake","Everyone supported Nexus callbacks that deliver progress more than once","Tentative: CHASM stream archetype with Redis or CHASM storage behind one interface, plus a separate notification component"],
+    i:[398,392], f:[], r:"none (content also in fork 61dde0c0)", minor:true},
+  "61dde0c0-440e-436f-98f7-53a5d866b7a8": {t:"stream-synthesis-2-nexus", d:"10-08 – 10-09", rel:"high", st:"done",
+    s:"Prep for the 10-09 streams-over-Nexus session and the lifecycle session with Justin. Nexus basics, Moe's pre-read vs Roey's Multi-Stage Ops doc. Created #403.",
+    k:["Moe: callbacks carry only notifications; data pulled by a sync long-poll read through the handler endpoint","For a workflow caller, reads land in History anyway, so pulling saves little at token rate","Redis XREAD BLOCK is a long-poll; true streaming responses probably not needed at first"],
+    i:[403], f:[], r:"Nexus streaming concepts; Moe vs Roey as of 10-09"},
+  "5df9ec3f-bc83-497f-87ec-121be17b03eb": {t:"Nexus streams design guide", d:"10-10", rel:"high", st:"open",
+    s:"Guide to post-synthesis meetings (10-05 notifications, 10-06 sync, 10-09 Nexus session). Drafted an unposted 'Streaming: current state' issue and asked whether to post it as a new issue.",
+    k:["10-09 consensus: caller gets a StreamRef at start and reads through a Nexus op on the handler endpoint","Unsettled: notification-only vs data in callbacks, replay-safe reads in a caller workflow, who leads the prototype","#crew-streaming could not be read (channel_not_found)"],
+    i:[398,403,392], f:["scratchpad/streaming-current-state.md (unposted)"], r:"Latest-state summary after the 10-09 Nexus session"},
+  "5ef7d72d-13bd-45d3-b52c-d7e393603b9c": {t:"Agent sessions stream project search", d:"10-08", rel:"low", st:"done",
+    s:"Lookup: #398 was written in session 13dc9ce5 (outside this worktree, forked as 1ad5940a); ad97f9f5 posted the #392 meeting notes.", k:[], i:[], f:[], r:"none", minor:true},
+  "ed900db3-164d-4cd1-98ae-b62a56830cb0": {t:"(empty, /clear only)", d:"10-08", rel:"none", st:"done", s:"Empty.", k:[], i:[], f:[], r:"none", minor:true},
+  "52c00432-5893-4489-9033-246ffc222c7d": {t:"streaming-nexus-scenarios", d:"10-10 – 10-12", rel:"high", st:"done",
+    s:"Fresh start from #398 plus the 10-09 meeting material. Posted the meeting summary and Roey's view to #392, then co-wrote the scenario proposal (food order, agent, Slack connector …) with d2 diagrams, protos and animations.",
+    k:["Nexus op returns a stream ref; progress callbacks carry records as NexusOperationProgress events","No separate notifier: a low-rate record is the notification","Producer epochs; server fences stale attempts and writes retractions","Wire-format gap: per-record offset/topic/producer has no place in nexus-rpc HTTP"],
+    i:[398,392], f:["~/src/temporal-stream-scenario-animations","Notion 'Nexus streaming scenarios'"], r:"v1 scenario proposal and its reasoning"},
+  "9f958c3b-ae57-4a75-861e-374f2e4c4d51": {t:"streaming-nexus-scenarios-check-videos", d:"10-11", rel:"high", st:"done",
+    s:"Checked 17 animation specs against the #392 proposal, fixed and re-rendered. Notion page not republished (3d and 6 videos local only).", k:[], i:[392], f:["animations commits 6e9e22c, 7b7ef67"], r:"none", minor:true},
+  "1d873462-c137-4f41-af3f-64c892175e7a": {t:"streaming-nexus-scenarios--moe-branches", d:"10-12", rel:"high", st:"done",
+    s:"Four subagents over Moe's moetemp branches; created #405 comparing Brook and Bridge with our scenarios.",
+    k:["Bridge: callbacks carry no data; caller workflow fetches records via a recorded sync Nexus read from Redis","Progress folded to ≤1 wake/s","Brook: Redis round trips on the WFT path; replay hashes payload plaintext"],
+    i:[405,392], f:[], r:"Code-level understanding of Brook/Bridge"},
+  "daf1b66d-ed31-4306-90ae-0db8f82fa95f": {t:"…moe-branches-independent", d:"10-12 – 10-13", rel:"high", st:"open",
+    s:"Main difference with Moe is notification-only vs data-carrying callbacks, not Redis vs native. Posted 10-12 meeting notes to #392 and suggestions to #405. On 10-13 created #407 and a new Notion page, rewriting all 22 scenarios to Roey's model (branch roey-v2, not pushed).",
+    k:["Max accepted a general notifier that carries small data and is embedded in the workflow","Roey: separate notifier from stream; poll while busy, subscribe once when idle","v2 gaps: 4f cross-namespace notification via SANO, 4b Redis/notify race, 6 notification path"],
+    i:[392,405,407], f:["animations-v2 branch roey-v2 (local)","Notion v2 page"], r:"Continuing v2 (Roey-model) scenarios, #407"},
+  "acb0eccf-ae7e-4d67-ab8c-b6a414a68e44": {t:"…moe-branches-independent--paul", d:"10-12 – 10-13", rel:"high", st:"done",
+    s:"Live-tailed meeting transcripts to suggest points; meeting with Paul on MetaBlock (#406). On 10-13 summarized Roey's notifier model vs the Callback component and studied Moe's latest Brook branches.",
+    k:["Roey's notifier: durable component, embeddable in a stream; Callback fires only once today, needs a per-wake trigger","Bridge records every read in History and does not address history-size limits","Roey: Moe's model fails because a consumer cannot subscribe by talking to the producer"],
+    i:[406,392,405], f:[], r:"Roey's notifier model; Brook code state 10-13"},
+  "e16cb958-f639-45e8-a7b2-5d81efcbf285": {t:"…independent--brook", d:"10-13", rel:"high", st:"open",
+    s:"Dan proposed Brook docs say no external service is needed (Redis optional), backed by a native CHASM stream Dan might prototype for Temporal Labs. Judged Brook largely forward-compatible.",
+    k:["Brook store is pluggable, so native could be a third store and the default","Exceptions: workflow publish path tied to Activities; stale marking, retention and Redis ACLs differ natively","Rust store interface was not read"],
+    i:[], f:[], r:"Native CHASM stream as a Brook backend / Labs prototype"},
+  "33563882-5094-4e35-aa92-c31751217285": {t:"Streaming status of Brook and Bridge", d:"10-12", rel:"high", st:"open",
+    s:"Cloned 7 moetemp forks (81 PR branches) to ~/src/temporalio-etc/streaming-moe, wrote a ~900-line handoff doc, then checked the last 24h of changes (new 'U5' stack). Compacted; ends before the final answer.",
+    k:["Brook: workflow-owned stream (Redis/memory), two-phase publish, producer dedupe; Bridge: Nexus progress callbacks + streamnotifier archetype","U5 (~16 draft PRs): SANO as stream caller, Worker follows a stream via OnProgress callbacks","Roey proposed 'adaptive notification' on Slack"],
+    i:[], f:["~/src/temporalio-etc/streaming-moe/brook-and-bridge.md","Notion 'Streaming: status of Brook and Bridge'"], r:"Briefing an agent on Moe's Brook/Bridge"},
+};
+
+const LINEAGES = [
+  {name:"CHASM Stream design", note:"Earliest work. The fork shares ~82 turns with its parent, then compacts.",
+   tree:[["4c25bb91",0],["2e46dd8b",1]]},
+  {name:"Max / Moe prototypes (AI-198)", note:"All forks branch at the same point (1673653d), so each child adds a later chapter.",
+   tree:[["213008ec",0],["07e2cad4",1],["03769e70",2],["da0da953",3],["d2217f75",4],["ded97b19",4],["ec8c4c84",4]]},
+  {name:"Synthesis and Nexus prep", note:"Starts from #398, written in session 13dc9ce5 outside this worktree.",
+   tree:[["ad97f9f5",0],["61dde0c0",1]]},
+  {name:"Nexus scenarios", note:"Not a fork of the synthesis lineage; it re-pastes #398 plus the 10-09 meeting material. Four forks branch at 2b546344.",
+   tree:[["52c00432",0],["9f958c3b",1],["1d873462",1],["acb0eccf",1],["e16cb958",2],["daf1b66d",1]]},
+  {name:"Standalone: landscape, storage, interfaces", note:"Independent sessions from 09-29 to 10-05. 3219b532, b5a32256 and f07e1eb4 took cross-session posting requests from a coordinating session 'ai-04'.",
+   tree:[["84113357",0],["3219b532",0],["b5a32256",0],["f07e1eb4",0],["a7385839",0]]},
+  {name:"Standalone: Brook/Bridge and current state", note:"",
+   tree:[["5df9ec3f",0],["33563882",0]]},
+  {name:"Lookups and unrelated", note:"Short searches, an empty session, and one non-streaming review.",
+   tree:[["93b3fca5",0],["a7b9ee74",0],["66994e39",0],["5ef7d72d",0],["c668664f",0],["ed900db3",0]]},
+];
+
+const full = p => Object.keys(S).find(k => k.startsWith(p));
+const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const issueLink = n => `<a href="https://github.com/temporalio/dandavison-log/issues/${n}">#${n}</a>`;
+const sidBtn = id => `<button class="sid" data-id="${id}" title="Copy resume command">${id.slice(0,8)}</button>`;
+const stPill = st => st === "open" ? `<span class="pill open">open thread</span>` : `<span class="pill done">done</span>`;
+
+document.getElementById("scope").innerHTML = META.scope;
+document.getElementById("phases").innerHTML = PHASES.map(([when, h, p]) =>
+  `<div class="phase"><span class="when">${esc(when)}</span><h3>${esc(h)}</h3><p>${esc(p)}</p></div>`).join("");
+
+document.querySelector("#reuse tbody").innerHTML = Object.entries(S)
+  .filter(([, x]) => x.r !== "none" && !x.r.startsWith("none"))
+  .sort((a, b) => (a[1].st === "open" ? 0 : 1) - (b[1].st === "open" ? 0 : 1))
+  .map(([id, x]) => `<tr><td>${esc(x.r)}</td><td>${sidBtn(id)} <span class="note">${esc(x.t)}</span></td><td>${stPill(x.st)}</td></tr>`).join("");
+
+document.getElementById("lineages").innerHTML = LINEAGES.map(L => {
+  const ids = L.tree.map(([p]) => full(p));
+  const tree = L.tree.map(([p, depth]) => {
+    const x = S[full(p)];
+    const pre = depth ? "   ".repeat(depth - 1) + "└─ " : "";
+    return `${pre}<b>${p}</b>  ${esc(x.d)}  ${esc(x.t)}`;
+  }).join("\n");
+  const cards = ids.map(id => {
+    const x = S[id];
+    return `<article class="sess${x.minor ? " minor" : ""}">
+      <div class="sess-head">${sidBtn(id)}<h3>${esc(x.t)}</h3><span class="meta">${esc(x.d)}</span>${stPill(x.st)}${x.rel !== "high" ? `<span class="pill rel">relevance: ${x.rel}</span>` : ""}</div>
+      <p>${esc(x.s)}</p>
+      ${x.k.length ? `<ul>${x.k.map(k => `<li>${esc(k)}</li>`).join("")}</ul>` : ""}
+      ${(x.i.length || x.f.length || x.r !== "none") ? `<div class="row">
+        ${x.i.length ? `<span><b>Issues</b> ${x.i.map(issueLink).join(" ")}</span>` : ""}
+        ${x.f.length ? `<span><b>Files</b> ${x.f.map(f => `<code>${esc(f)}</code>`).join(", ")}</span>` : ""}
+        ${x.r !== "none" ? `<span><b>Resume for</b> ${esc(x.r)}</span>` : ""}</div>` : ""}
+    </article>`;
+  }).join("");
+  return `<div class="lineage"><header><h2 style="margin-bottom:2px">${esc(L.name)}</h2>${L.note ? `<p>${esc(L.note)}</p>` : ""}</header>
+    <div class="scroll"><div class="tree">${tree}</div></div>${cards}</div>`;
+}).join("");
+
+const byIssue = {};
+for (const [id, x] of Object.entries(S)) for (const n of x.i) (byIssue[n] ||= []).push(id);
+document.querySelector("#issues tbody").innerHTML = Object.keys(byIssue).map(Number).sort((a, b) => a - b)
+  .map(n => `<tr><td>${issueLink(n)}</td><td>${byIssue[n].map(id => `${sidBtn(id)} <span class="note">${esc(S[id].t)}</span>`).join("<br>")}</td></tr>`).join("");
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest(".sid"); if (!b) return;
+  const cmd = `agent-sessions resume claude:${b.dataset.id}`;
+  try { await navigator.clipboard.writeText(cmd); b.textContent = "copied"; }
+  catch { b.textContent = b.dataset.id; }
+  b.classList.add("copied");
+  setTimeout(() => { b.textContent = b.dataset.id.slice(0, 8); b.classList.remove("copied"); }, 1400);
+});
+</script>

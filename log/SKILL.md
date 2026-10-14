@@ -2,7 +2,7 @@
 name: log
 description: |
   Work with my log repo (temporalio/dandavison-log issues cloned at ~/src/temporalio-etc/log)
-  Triggers: "log", "exfiltrate", "gather-context"
+  Triggers: "log", "exfiltrate", "gather-context", "map-sessions"
 ---
 
 # Log
@@ -73,3 +73,18 @@ When I ask you to gather-context on a topic, do the following:
 
 At any point, if slack/notion etc are unavailable, stop and ask me; do not skip/fallback -- this
 will result in inferior results.
+
+
+## Map-sessions
+
+Map-sessions means to find all agent sessions relevant to a given topic, understand their
+genealogical relationships, understand at a high level what has been discussed in each lineage, and
+produce this information as a page of html including tables and visualizations, as you see fit. This
+page should allow me to understand which session to reuse for a certain purpose, or which sessions
+to extract information from, etc.
+
+Build the page from `map-sessions-template.html` in this skill's directory: copy it, set `<title>`
+and `<h1>`, and replace the `META`, `PHASES`, `S` and `LINEAGES` data blocks (the comment above them
+gives their shape). Do not change the styling or rendering code. Use `agent-sessions tree` for
+genealogy, and parallel subagents to summarise lineages; for a forked child, summarise only what
+happened after the fork. Publish the page as an Artifact.
