@@ -33,21 +33,36 @@ two things readers conflate: server-side state, and the user code that acts on i
 | A **Temporal** box | Exactly one namespace; label it `Temporal — <namespace>`. Two namespaces are two boxes, since that is a separate Frontend to talk to and in general a separate cell. |
 | A box **inside** a Temporal box | One execution — workflow, activity, Nexus operation, schedule. Server-side state, never code. |
 | A **dashed container** | One worker or client process, holding the user code that corresponds to those executions. Label it with something the reader could run. |
-| A **solid** arrow | A request, drawn sender → receiver. |
-| A **dashed** arrow | A response to a request the other side already made. |
+| A **solid** arrow | A request (RPC), drawn sender → receiver. |
+| A **dashed** arrow | A task or callback delivery to a worker, or a response to a request the other side already made. |
 
 Everything a worker receives arrives on a long poll it already has open, so **every task arrow is
 dashed and points from Temporal to the worker**. Do not draw the poll itself: it is noise, and
 drawing it makes the task look like an unsolicited push.
 
-Further rules that make these diagrams readable:
+Layout. Fix every top-level box with `top`/`left`, use `direction: right`, and render with
+`d2 --layout=tala` (other engines ignore `top`/`left`):
 
-- `direction: right`. These flows are wide, not tall.
-- Number the steps in arrow labels, following one happy path. Order is otherwise unrecoverable
-  from a box diagram, and a reader who cannot find the entry point reads nothing.
-- Suffix a number with a letter (`6a`, `6b`) for steps that are concurrent, or alternatives, at the
-  same point in the path; say which in the prose. Give a long-lived arrow — a subscription held open
-  across the whole flow — the number of the step that opens it, and say it stays open.
+- The user app (client or backend, dashed) is at the top left: `top: 0; left: 0`.
+- Each `Temporal — namespace X` box is in the top row, to the right of the app (first namespace
+  at `left` about 650–700); further namespaces go further right.
+- Each namespace's worker (dashed, `X worker`) sits below its namespace (`top` about 650–800).
+- External stores (Redis, payload storage) are dashed cylinders at the bottom.
+- External clients and people (e.g. restaurant/courier clients, Slack, a requester) are dashed
+  boxes, or `person` and `cloud` shapes, at the bottom right or on the left edge.
+- Components nest inside their execution: a Stream inside its workflow, a Worker Callback inside
+  its Stream, a NexusOperation inside the workflow that scheduled it.
+- When TALA crowds things, add explicit `width`s or invisible spacers
+  (`spacer: "" {width: 200; height: 40; style.opacity: 0}`). If TALA moves a container's title
+  outside or to the bottom of the box, set `label.near: top-center` on the container.
+
+Labels and content:
+
+- Number the arrow labels to match the numbered steps in the prose, following one happy path.
+  Put several steps carried by one arrow on one label, one per line with `\n`
+  (`2a. workflow task\n5a. workflow task`).
+- Suffix a number with a letter (`6a`, `6b`) for the several arrows of one step, in order, or for
+  steps that are concurrent or alternatives at the same point; say which in the prose.
 - Label every arrow that crosses a process or namespace boundary with the actual API —
   `UpdateWorkflowExecution`, `Nexus StartOperation (HTTP)`, `RespondActivityTaskCompleted`. The API
   name is the most informative label available; never write "calls".
@@ -55,46 +70,101 @@ Further rules that make these diagrams readable:
   subject; in an application diagram they are where the reader stops seeing the application.
 - One diagram per question. A topology diagram and a one-request sequence diagram over the same
   system are two diagrams.
-- Put a `note` near the bottom for anything true of the whole diagram, including whether what is
-  drawn actually exists yet.
-- When you're done, verify arrow numbering, and verify the rendered output visually, checking for
-  example that it is visually clear to which arrow each arrow label refers.
+- Always render to PNG and look at it. Check that each label is next to its own arrow, that no
+  label overlaps a line or box, and that no arrow crosses an unrelated box; adjust positions and
+  re-render until it is clean.
 
-Worked example — a workflow calling a Nexus operation another namespace backs with an activity:
+Example — an app follows a workflow's stream through a Worker Callback:
 
 ```d2
 direction: right
 
-cw: Caller worker — your code {
+user: Food-ordering app {
+  top: 0
+  left: 0
   style.stroke-dash: 3
-  wfcode: Workflow code
+  backend: Backend {
+    style.stroke-dash: 3
+    client: Temporal client
+    worker: Worker\n(Nexus handler)
+  }
+  phone: Phone
 }
 
-t1: Temporal — caller namespace {
-  wf: Workflow execution\n(NexusOperation component in its tree)
+A: Temporal — namespace A {
+  top: 0
+  left: 700
+  wf: OrderWorkflow {
+    s: Stream {
+      wcb: Worker Callback
+    }
+  }
 }
 
-t2: Temporal — handler namespace {
-  saa: Activity execution
-}
-
-hw: Handler worker — their code {
+aw: A worker {
+  top: 650
+  left: 700
   style.stroke-dash: 3
-  handler: Nexus operation handler
-  act: Activity code
+  code: OrderWorkflow code
 }
 
-api: External API
+rc: Restaurant / courier clients {
+  top: 650
+  left: 1350
+  style.stroke-dash: 3
+}
 
-cw.wfcode -> t1.wf: 1. RespondWorkflowTaskCompleted\n(ScheduleNexusOperation)
-t1.wf -> t2: 2. Nexus StartOperation (HTTP)
-t2 -> hw.handler: 3. Nexus task {style.stroke-dash: 3}
-hw.handler -> t2.saa: 4. StartActivityExecution
-t2 -> hw.act: 5. activity task {style.stroke-dash: 3}
-hw.act -> api: 6. HTTP call
-api -> hw.act: 7. response {style.stroke-dash: 3}
-hw.act -> t2.saa: 8. RespondActivityTaskCompleted
-t2.saa -> t1.wf: 9. Nexus completion callback (HTTP)
+user.backend.client -> A.wf: 1. StartWorkflowExecution\n(attach Worker Callback)
+A.wf -> aw.code: 2a. workflow task\n5a. workflow task {style.stroke-dash: 3}
+aw.code -> A.wf.s: "2b. RespondWorkflowTaskCompleted\n(append \"order accepted\")\n5b. close stream"
+rc -> A.wf.s: 3. append stage
+A.wf.s.wcb -> user.backend.worker: 4. Nexus task\n(records, offsets, source_context)\n5c. final {style.stroke-dash: 3}
+user.backend.worker -> user.phone: 4. push
+```
+
+Example — a backend reads Redis, and a notifier execution wakes it when idle:
+
+```d2
+direction: right
+
+ui: UI backend {
+  top: 0
+  left: 0
+  style.stroke-dash: 3
+  worker: Worker\n(Nexus handler,\ntask queue ui-backend) {top: 0; left: 0}
+  client: Temporal client {top: 250; left: 0; width: 250}
+}
+
+A: Temporal — namespace A {
+  top: 0
+  left: 700
+  label.near: top-center
+  n: Notifier agent-123 {
+    label.near: top-center
+    wcb: Worker Callback {top: 150; left: 0}
+  }
+}
+
+aw: A worker {
+  top: 650
+  left: 700
+  style.stroke-dash: 3
+  act: Agent activity
+}
+
+redis: Redis stream agent-123 {
+  top: 1000
+  left: 100
+  shape: cylinder
+  style.stroke-dash: 3
+}
+
+aw.act -> redis: 1. XADD
+ui.client -> redis: 2. XREAD BLOCK
+ui.client -> A.n: 3. Subscribe
+aw.act -> A.n: 4. Notify(position)
+A.n.wcb -> ui.worker: 5. Worker Callback(position) {style.stroke-dash: 3}
+ui.client -> redis: 6. XREAD from position
 ```
 
 
