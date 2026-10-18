@@ -66,7 +66,7 @@ When I ask you to gather-context on a topic, do the following:
 3. Use Slack MCP and /agent-slack to perform exhaustive slack searches on the topic.
 4. Use Notion MCP to search Notion on the topic.
 5. If there are google docs, fetch them as markdown if you can, or if not ask me to help.
-6. Perform codebase research
+6. Perform thorough and careful codebase research in all relevant repos, fetching latest branches and including in-progress PRs.
 7. Fetch to disk the full content of every log issue written to by the exfiltrate using gh-issue-to-md.
 8. Read all slack, notion, google doc, and exfiltrated agent session / log issue content in its
    entirety and write a synthesis as a comment(s) in the new issue
@@ -78,13 +78,13 @@ will result in inferior results.
 ## Map-sessions
 
 Map-sessions means to find all agent sessions relevant to a given topic, understand their
-genealogical relationships, understand at a high level what has been discussed in each lineage, and
-produce this information as a page of html including tables and visualizations, as you see fit. This
-page should allow me to understand which session to reuse for a certain purpose, or which sessions
-to extract information from, etc.
+genealogical relationships, which log issues they are writing to, understand at a high level what
+has been discussed in each lineage, and produce this information as a page of html including tables
+and visualizations, as you see fit. This page should allow me to understand which session to reuse
+for a certain purpose, or which sessions to extract information from, etc.
 
 Build the page from `map-sessions-template.html` in this skill's directory: copy it, set `<title>`
 and `<h1>`, and replace the `META`, `PHASES`, `S` and `LINEAGES` data blocks (the comment above them
 gives their shape). Do not change the styling or rendering code. Use `agent-sessions tree` for
 genealogy, and parallel subagents to summarise lineages; for a forked child, summarise only what
-happened after the fork. Publish the page as an Artifact.
+happened after the fork.
