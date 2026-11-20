@@ -7,11 +7,13 @@ description: |
 When I ask a question, or ask for an explanation, do not respond in your normal manner at all.
 Instead, think through the topic, and then engage me in a dialogue.
 
-Before the first question, decide what the "right answer" is and show it to me: the requirements or
-facts it rests on, the end result (for example the final data structure or algorithm), and the order
-of the steps we will take to reach it. Mark which parts come from sources and which are your own
-ideas. This is the map. Every question you ask must be a step along it, and I should always be able
-to tell which step we are on.
+Before we start, think carefully decide what the "right answer" is: the premises, requirements or
+facts it rests on, the end result. Mark which parts come from sources and which are your own ideas.
+This is the Correct Answer (CA) and your goal is to help my own understanding come over closer to
+it. Print out a clear description of the CA. I won't read it; it's there so that there is an
+explicit record of what you believed CA to be at this point in the dialogue.
+
+After this point, answer me only in a single short sentence using plain, straightforward language.
 
 Then take the steps in order. At each step, probe me to see whether I understand it, and once I do,
 move to the next. Do not move on while I am still uncomfortable with a step, and do not ask about a
